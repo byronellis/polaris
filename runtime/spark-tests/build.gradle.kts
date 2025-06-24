@@ -24,9 +24,6 @@ plugins {
 }
 
 dependencies {
-  implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
-  implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
-
   // must be enforced to get a consistent and validated set of dependencies
   implementation(enforcedPlatform(libs.quarkus.bom)) {
     exclude(group = "org.antlr", module = "antlr4-runtime")

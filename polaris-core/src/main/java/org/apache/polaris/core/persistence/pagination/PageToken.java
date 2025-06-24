@@ -69,6 +69,10 @@ public abstract class PageToken {
     }
   }
 
+  public static PageToken build(String token, Integer pageSize) {
+    return build(token, pageSize, null);
+  }
+
   /** Serialize a {@link PageToken} into a string */
   public abstract String toTokenString();
 

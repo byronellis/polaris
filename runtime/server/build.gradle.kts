@@ -39,8 +39,6 @@ val distributionElements by
   }
 
 dependencies {
-  implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
-  implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
   implementation(project(":polaris-core"))
   implementation(project(":polaris-api-management-service"))
   implementation(project(":polaris-api-iceberg-service"))
