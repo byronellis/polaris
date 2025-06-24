@@ -32,8 +32,8 @@ configurations.all {
 }
 
 dependencies {
-    implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
-    implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
+  implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
+  implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
   implementation(enforcedPlatform(libs.quarkus.bom))
   implementation("io.quarkus:quarkus-junit5")
   implementation(platform(libs.testcontainers.bom))
