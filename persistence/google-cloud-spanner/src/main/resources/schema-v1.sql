@@ -18,6 +18,11 @@
 
 CREATE SEQUENCE IF NOT EXISTS Ids OPTIONS(sequence_kind = 'bit_reversed_positive');
 
+CREATE TABLE IF NOT EXISTS Realms(
+  RealmId STRING(MAX) NOT NULL
+)
+PRIMARY KEY (RealmId);
+
 CREATE TABLE IF NOT EXISTS Entities(
 RealmId STRING(MAX) NOT NULL,
 CatalogId INT64 NOT NULL,
@@ -35,9 +40,12 @@ LastUpdateTimestamp INT64,
 `Properties` JSON,
 InternalProperties JSON,
 GrantRecordsVersion INT64)
-PRIMARY KEY (RealmId,Id);
+PRIMARY KEY (RealmId,Id),
+INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
 
 CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS EntityNameIndex ON Entities(RealmId,CatalogId,ParentId,TypeCode,Name);
+
+CREATE INDEX IF NOT EXISTS EntityChildrenIndex ON Entities(RealmId,ParentId);
 
 CREATE TABLE IF NOT EXISTS GrantRecords(
   RealmId STRING(MAX) NOT NULL,
@@ -46,16 +54,21 @@ CREATE TABLE IF NOT EXISTS GrantRecords(
   GranteeCatalogId INT64 NOT NULL,
   GranteeId INT64 NOT NULL,
   PrivilegeCode INT64)
-PRIMARY KEY (RealmId,SecurableCatalogId,SecurableId,GranteeCatalogId,GranteeId,PrivilegeCode);
+PRIMARY KEY (RealmId,SecurableCatalogId,SecurableId,GranteeCatalogId,GranteeId,PrivilegeCode),
+INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS GrantRecordsGranteeIndex ON GrantRecords(RealmId,GranteeCatalogId,GranteeId);
 
 CREATE TABLE IF NOT EXISTS PrincipalAuthenticationData(
   RealmId STRING(MAX) NOT NULL,
-  PrincipalId INT64 NOT NULL,
   PrincipalClientId STRING(MAX) NOT NULL,
+  PrincipalId INT64 NOT NULL,
   MainSecretHash STRING(MAX) NOT NULL,
   SecondarySecretHash STRING(MAX) NOT NULL,
   SecretSalt STRING(MAX) NOT NULL)
-PRIMARY KEY (RealmId,PrincipalClientId);
+PRIMARY KEY (RealmId,PrincipalClientId,PrincipalId),
+INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
+
 
 CREATE TABLE IF NOT EXISTS PolicyMappingRecord(
   RealmId STRING(MAX) NOT NULL,
@@ -65,6 +78,5 @@ CREATE TABLE IF NOT EXISTS PolicyMappingRecord(
   PolicyCatalogId INT64 NOT NULL,
   PolicyId INT64 NOT NULL,
   Parameters JSON)
-PRIMARY KEY (RealmId, TargetCatalogId, TargetId, PolicyTypeCode, PolicyCatalogId, PolicyId);
-
-
+PRIMARY KEY (RealmId, TargetCatalogId, TargetId, PolicyTypeCode, PolicyCatalogId, PolicyId),
+INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
