@@ -18,26 +18,27 @@
  */
 
 plugins {
-  alias(libs.plugins.quarkus)
+  id("polaris-server")
   alias(libs.plugins.jandex)
-  id("polaris-runtime")
-}
-
-configurations.all {
-  if (name != "checkstyle") {
-    exclude(group = "org.antlr", module = "antlr4-runtime")
-    exclude(group = "org.scala-lang", module = "scala-library")
-    exclude(group = "org.scala-lang", module = "scala-reflect")
-  }
 }
 
 dependencies {
-    implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
-    implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
-  implementation(enforcedPlatform(libs.quarkus.bom))
-  implementation("io.quarkus:quarkus-junit5")
-  implementation(platform(libs.testcontainers.bom))
-  implementation("org.testcontainers:testcontainers")
-  implementation("org.testcontainers:postgresql")
-  implementation(project(":polaris-container-spec-helper"))
+  implementation(project(":polaris-core"))
+  implementation(libs.slf4j.api)
+  implementation(libs.guava)
+
+  implementation(platform(libs.google.cloud.libraries.bom))
+  implementation("com.google.cloud:google-cloud-spanner")
+
+  compileOnly(platform(libs.jackson.bom))
+  compileOnly("com.fasterxml.jackson.core:jackson-annotations")
+  compileOnly(libs.jakarta.annotation.api)
+  compileOnly(libs.jakarta.enterprise.cdi.api)
+  compileOnly(libs.jakarta.inject.api)
+
+  implementation(libs.smallrye.common.annotation) // @Identifier
+
+  testImplementation(libs.mockito.junit.jupiter)
+  testImplementation(libs.h2)
+  testImplementation(testFixtures(project(":polaris-core")))
 }

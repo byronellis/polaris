@@ -75,7 +75,7 @@ dependencies {
 
   implementation(libs.auth0.jwt)
 
-  implementation(platform(libs.google.cloud.storage.bom))
+  implementation(platform(libs.google.cloud.libraries.bom))
   implementation("com.google.cloud:google-cloud-storage")
 
   implementation(platform(libs.awssdk.bom))
@@ -117,7 +117,7 @@ dependencies {
   testFixturesImplementation("org.apache.iceberg:iceberg-core")
   testFixturesImplementation("org.apache.iceberg:iceberg-aws")
 
-  testFixturesImplementation(platform(libs.google.cloud.storage.bom))
+  testFixturesImplementation(platform(libs.google.cloud.libraries.bom))
   testFixturesImplementation("com.google.cloud:google-cloud-storage")
   testFixturesImplementation(platform(libs.awssdk.bom))
   testFixturesImplementation("software.amazon.awssdk:sts")

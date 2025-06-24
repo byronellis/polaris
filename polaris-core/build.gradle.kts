@@ -93,7 +93,7 @@ dependencies {
   }
 
   implementation("org.apache.iceberg:iceberg-gcp")
-  implementation(platform(libs.google.cloud.storage.bom))
+  implementation(platform(libs.google.cloud.libraries.bom))
   implementation("com.google.cloud:google-cloud-storage")
 
   testFixturesApi("com.fasterxml.jackson.core:jackson-core")

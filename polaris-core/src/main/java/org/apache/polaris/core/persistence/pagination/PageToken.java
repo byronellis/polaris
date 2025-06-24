@@ -34,24 +34,32 @@ public abstract class PageToken {
 
   /** Build a new PageToken that reads everything */
   public static PageToken readEverything() {
-    return build(null, null);
+    return build(null, null, null);
   }
 
   /** Build a new PageToken from an input String, without a specified page size */
   public static PageToken fromString(String token) {
-    return build(token, null);
+    return build(token, null, null);
   }
 
   /** Build a new PageToken from a limit */
   public static PageToken fromLimit(Integer pageSize) {
-    return build(null, pageSize);
+    return build(null, pageSize, null);
+  }
+
+  public static PageToken fromLimitWithOffset(Integer pageSize, Long offset) {
+    return build(null, pageSize, offset);
   }
 
   /** Build a {@link PageToken} from the input string and page size */
-  public static PageToken build(String token, Integer pageSize) {
+  public static PageToken build(String token, Integer pageSize, Long offset) {
     if (token == null || token.isEmpty()) {
       if (pageSize != null) {
-        return new LimitPageToken(pageSize);
+        if (offset != null) {
+          return new OffsetLimitPageToken(offset, pageSize);
+        } else {
+          return new LimitPageToken(pageSize);
+        }
       } else {
         return new ReadEverythingPageToken();
       }

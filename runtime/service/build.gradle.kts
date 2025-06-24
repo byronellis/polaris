@@ -24,6 +24,8 @@ plugins {
 }
 
 dependencies {
+    implementation("io.quarkiverse.googlecloudservices:quarkus-google-cloud-spanner")
+    implementation(enforcedPlatform("io.quarkus.platform:quarkus-google-cloud-services-bom:3.21.4"))
   implementation(project(":polaris-core"))
   implementation(project(":polaris-api-management-service"))
   implementation(project(":polaris-api-iceberg-service"))
@@ -73,7 +75,7 @@ dependencies {
   compileOnly(libs.jakarta.annotation.api)
   compileOnly(libs.spotbugs.annotations)
 
-  implementation(platform(libs.google.cloud.storage.bom))
+  implementation(platform(libs.google.cloud.libraries.bom))
   implementation("com.google.cloud:google-cloud-storage")
   implementation(platform(libs.awssdk.bom))
   implementation("software.amazon.awssdk:sts")
