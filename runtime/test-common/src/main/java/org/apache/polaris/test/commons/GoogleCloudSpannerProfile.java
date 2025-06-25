@@ -17,26 +17,23 @@
  * under the License.
  */
 
-plugins {
-  id("polaris-server")
-  alias(libs.plugins.jandex)
-}
+package org.apache.polaris.test.commons;
 
-dependencies {
-  implementation(project(":polaris-core"))
-  implementation(libs.slf4j.api)
-  implementation(libs.guava)
+import io.quarkus.test.junit.QuarkusTestProfile;
+import java.util.List;
+import java.util.Map;
 
-  implementation(platform(libs.google.cloud.libraries.bom))
-  implementation("com.google.cloud:google-cloud-spanner")
+public class GoogleCloudSpannerProfile implements QuarkusTestProfile {
 
-  compileOnly(libs.jakarta.annotation.api)
-  compileOnly(libs.jakarta.enterprise.cdi.api)
-  compileOnly(libs.jakarta.inject.api)
+  @Override
+  public List<TestResourceEntry> testResources() {
+    return List.of(
+        new QuarkusTestProfile.TestResourceEntry(
+            GoogleCloudSpannerLifeCycleManagement.class, Map.of()));
+  }
 
-  implementation(libs.smallrye.common.annotation) // @Identifier
-
-  testImplementation(libs.mockito.junit.jupiter)
-  testImplementation(libs.h2)
-  testImplementation(testFixtures(project(":polaris-core")))
+  @Override
+  public Map<String, String> getConfigOverrides() {
+    return Map.of("polaris.persistence.auto-bootstrap-types", "google-cloud-spanner");
+  }
 }

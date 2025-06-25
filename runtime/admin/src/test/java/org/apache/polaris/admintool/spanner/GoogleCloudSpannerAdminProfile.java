@@ -17,26 +17,26 @@
  * under the License.
  */
 
-plugins {
-  id("polaris-server")
-  alias(libs.plugins.jandex)
-}
+package org.apache.polaris.admintool.spanner;
 
-dependencies {
-  implementation(project(":polaris-core"))
-  implementation(libs.slf4j.api)
-  implementation(libs.guava)
+import java.util.List;
+import java.util.Map;
+import org.apache.polaris.test.commons.GoogleCloudSpannerLifeCycleManagement;
+import org.apache.polaris.test.commons.GoogleCloudSpannerProfile;
 
-  implementation(platform(libs.google.cloud.libraries.bom))
-  implementation("com.google.cloud:google-cloud-spanner")
+public class GoogleCloudSpannerAdminProfile extends GoogleCloudSpannerProfile {
 
-  compileOnly(libs.jakarta.annotation.api)
-  compileOnly(libs.jakarta.enterprise.cdi.api)
-  compileOnly(libs.jakarta.inject.api)
+  @Override
+  public Map<String, String> getConfigOverrides() {
+    return Map.of(
+        "polaris.persistence.type",
+        "google-cloud-spanner",
+        "polaris.persistence.spanner.database-id",
+        "projects/emulator-project/instances/test-instance/databases/test-database");
+  }
 
-  implementation(libs.smallrye.common.annotation) // @Identifier
-
-  testImplementation(libs.mockito.junit.jupiter)
-  testImplementation(libs.h2)
-  testImplementation(testFixtures(project(":polaris-core")))
+  @Override
+  public List<TestResourceEntry> testResources() {
+    return List.of(new TestResourceEntry(GoogleCloudSpannerLifeCycleManagement.class, Map.of()));
+  }
 }

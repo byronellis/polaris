@@ -26,4 +26,5 @@ plugins {
 dependencies {
   compileOnly(libs.smallrye.config.core)
   implementation(project(":polaris-relational-jdbc"))
+  implementation(project(":polaris-google-cloud-spanner"))
 }

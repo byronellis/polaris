@@ -17,26 +17,10 @@
  * under the License.
  */
 
-plugins {
-  id("polaris-server")
-  alias(libs.plugins.jandex)
-}
+package org.apache.polaris.admintool.spanner;
 
-dependencies {
-  implementation(project(":polaris-core"))
-  implementation(libs.slf4j.api)
-  implementation(libs.guava)
+import io.quarkus.test.junit.TestProfile;
+import org.apache.polaris.admintool.BootstrapCommandTestBase;
 
-  implementation(platform(libs.google.cloud.libraries.bom))
-  implementation("com.google.cloud:google-cloud-spanner")
-
-  compileOnly(libs.jakarta.annotation.api)
-  compileOnly(libs.jakarta.enterprise.cdi.api)
-  compileOnly(libs.jakarta.inject.api)
-
-  implementation(libs.smallrye.common.annotation) // @Identifier
-
-  testImplementation(libs.mockito.junit.jupiter)
-  testImplementation(libs.h2)
-  testImplementation(testFixtures(project(":polaris-core")))
-}
+@TestProfile(GoogleCloudSpannerAdminProfile.class)
+public class GoogleCloudSpannerBootstrapCommandTest extends BootstrapCommandTestBase {}

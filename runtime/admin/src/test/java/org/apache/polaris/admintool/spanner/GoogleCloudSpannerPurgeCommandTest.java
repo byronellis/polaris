@@ -17,26 +17,24 @@
  * under the License.
  */
 
-plugins {
-  id("polaris-server")
-  alias(libs.plugins.jandex)
-}
+package org.apache.polaris.admintool.spanner;
 
-dependencies {
-  implementation(project(":polaris-core"))
-  implementation(libs.slf4j.api)
-  implementation(libs.guava)
+import com.google.common.collect.ImmutableMap;
+import io.quarkus.test.junit.TestProfile;
+import java.util.Map;
+import org.apache.polaris.admintool.PurgeCommandTestBase;
 
-  implementation(platform(libs.google.cloud.libraries.bom))
-  implementation("com.google.cloud:google-cloud-spanner")
+@TestProfile(GoogleCloudSpannerPurgeCommandTest.Profile.class)
+public class GoogleCloudSpannerPurgeCommandTest extends PurgeCommandTestBase {
 
-  compileOnly(libs.jakarta.annotation.api)
-  compileOnly(libs.jakarta.enterprise.cdi.api)
-  compileOnly(libs.jakarta.inject.api)
+  public static class Profile extends GoogleCloudSpannerAdminProfile {
 
-  implementation(libs.smallrye.common.annotation) // @Identifier
-
-  testImplementation(libs.mockito.junit.jupiter)
-  testImplementation(libs.h2)
-  testImplementation(testFixtures(project(":polaris-core")))
+    @Override
+    public Map<String, String> getConfigOverrides() {
+      return ImmutableMap.<String, String>builder()
+          .putAll(super.getConfigOverrides())
+          .put("pre-bootstrap", "true")
+          .build();
+    }
+  }
 }

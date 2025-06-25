@@ -37,5 +37,10 @@ dependencies {
   implementation(platform(libs.testcontainers.bom))
   implementation("org.testcontainers:testcontainers")
   implementation("org.testcontainers:postgresql")
+
+  implementation("org.testcontainers:gcloud")
+  implementation(platform(libs.google.cloud.libraries.bom))
+  implementation("com.google.cloud:google-cloud-spanner")
+
   implementation(project(":polaris-container-spec-helper"))
 }

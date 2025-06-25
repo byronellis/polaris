@@ -27,7 +27,9 @@ public interface GoogleCloudSpannerConfiguration {
 
   public Optional<String> instanceId();
 
-  public String databaseId();
+  public Optional<String> databaseId();
 
   public Optional<String> emulatorHost();
+
+  public Optional<Boolean> bootstrapSchema();
 }

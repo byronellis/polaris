@@ -17,26 +17,10 @@
  * under the License.
  */
 
-plugins {
-  id("polaris-server")
-  alias(libs.plugins.jandex)
-}
+package org.apache.polaris.quarkus.common.config.spanner;
 
-dependencies {
-  implementation(project(":polaris-core"))
-  implementation(libs.slf4j.api)
-  implementation(libs.guava)
+import io.smallrye.config.ConfigMapping;
+import org.apache.polaris.persistence.relational.spanner.GoogleCloudSpannerConfiguration;
 
-  implementation(platform(libs.google.cloud.libraries.bom))
-  implementation("com.google.cloud:google-cloud-spanner")
-
-  compileOnly(libs.jakarta.annotation.api)
-  compileOnly(libs.jakarta.enterprise.cdi.api)
-  compileOnly(libs.jakarta.inject.api)
-
-  implementation(libs.smallrye.common.annotation) // @Identifier
-
-  testImplementation(libs.mockito.junit.jupiter)
-  testImplementation(libs.h2)
-  testImplementation(testFixtures(project(":polaris-core")))
-}
+@ConfigMapping(prefix = "polaris.persistence.spanner")
+public interface QuarkusGoogleCloudSpannerConfiguration extends GoogleCloudSpannerConfiguration {}

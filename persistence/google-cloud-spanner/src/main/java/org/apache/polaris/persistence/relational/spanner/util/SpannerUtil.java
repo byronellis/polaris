@@ -19,6 +19,7 @@
 
 package org.apache.polaris.persistence.relational.spanner.util;
 
+import com.google.cloud.ServiceOptions;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.Dialect;
 import com.google.cloud.spanner.InstanceId;
@@ -28,6 +29,12 @@ import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.Type;
+import com.google.cloud.spanner.Value;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import org.apache.polaris.persistence.relational.spanner.GoogleCloudSpannerConfiguration;
 
 public final class SpannerUtil {
@@ -39,6 +46,25 @@ public final class SpannerUtil {
 
   public static final String JSON_TYPE =
       Type.json().getSpannerTypeName(Dialect.GOOGLE_STANDARD_SQL);
+
+  private static final Gson GSON = new Gson();
+
+  public static Value jsonValue(Map<String, String> properties) {
+    JsonObject jsonObject = new JsonObject();
+    if (properties != null) {
+      properties.forEach(jsonObject::addProperty);
+    }
+    return Value.json(jsonObject.toString());
+  }
+
+  public static Map<String, String> jsonMap(String properties) {
+    HashMap<String, String> map = new HashMap<>();
+    if (properties != null && !properties.isBlank()) {
+      JsonObject obj = GSON.fromJson(properties, JsonObject.class);
+      obj.asMap().forEach((k, v) -> map.put(k, v.toString()));
+    }
+    return map;
+  }
 
   public static KeySet asKeySet(Iterable<Key> keys) {
     KeySet.Builder builder = KeySet.newBuilder();
@@ -62,8 +88,18 @@ public final class SpannerUtil {
         .build();
   }
 
+  public static Optional<String> projectFromConfiguration(GoogleCloudSpannerConfiguration config) {
+    if (config.databaseId().isPresent()) {
+      String databaseId = config.databaseId().get();
+      if (databaseId.startsWith("project")) {
+        return Optional.ofNullable(DatabaseId.of(databaseId).getInstanceId().getProject());
+      }
+    }
+    return config.projectId();
+  }
+
   public static DatabaseId databaseFromConfiguration(GoogleCloudSpannerConfiguration config) {
-    String databaseId = config.databaseId();
+    String databaseId = config.databaseId().orElseThrow();
     if (databaseId.startsWith("project")) {
       return DatabaseId.of(databaseId);
     }
@@ -77,7 +113,8 @@ public final class SpannerUtil {
 
   public static Spanner spannerFromConfiguration(GoogleCloudSpannerConfiguration config) {
     return Modifier.of(SpannerOptions.newBuilder())
-        .ifPresent(config.emulatorHost(), (b, host) -> b.setEmulatorHost(host))
+        .ifPresent(projectFromConfiguration(config), ServiceOptions.Builder::setProjectId)
+        .ifPresent(config.emulatorHost(), SpannerOptions.Builder::setEmulatorHost)
         .get()
         .build()
         .getService();

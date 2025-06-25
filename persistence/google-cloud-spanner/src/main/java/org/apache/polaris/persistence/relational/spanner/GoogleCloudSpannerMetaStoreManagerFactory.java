@@ -24,8 +24,14 @@ import com.google.cloud.spanner.Spanner;
 import io.smallrye.common.annotation.Identifier;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.apache.polaris.core.PolarisCallContext;
@@ -74,11 +80,12 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
 
   protected GoogleCloudSpannerMetaStoreManagerFactory() {}
 
+  protected boolean initialized = false;
+
   protected AtomicReference<Spanner> spannerReference = new AtomicReference<>(null);
   protected AtomicReference<DatabaseId> databaseIdAtomicReference = new AtomicReference<>(null);
 
   protected Spanner getSpanner() {
-
     return spannerReference.updateAndGet(
         current -> {
           if (current == null) {
@@ -92,29 +99,39 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
     return databaseIdAtomicReference.updateAndGet(
         current -> {
           if (current == null) {
-            return SpannerUtil.databaseFromConfiguration(googleCloudSpannerConfiguration);
+            return initializeSchema(
+                SpannerUtil.databaseFromConfiguration(googleCloudSpannerConfiguration));
           }
           return current;
         });
   }
 
-  private RealmState getOrCreateRealmState(RealmContext realmContext) {
+  private RealmState getOrCreateRealmState(RealmContext realmContext, boolean isBootstrap) {
     return realmStateMap.computeIfAbsent(
         realmContext.getRealmIdentifier(),
         (realmId) -> {
           PolarisMetaStoreManager metaStoreManager = new AtomicOperationMetaStoreManager();
           // For the moment each realm gets its own Spanner connection... we could prob
-          return new RealmState(
-              metaStoreManager,
-              () -> {
-                return new GoogleSpannerBasePersistenceImpl(
-                    getSpanner(),
-                    getDatabaseId(),
-                    secretGenerators.get(realmId),
-                    polarisStorageIntegrationProvider);
-              },
-              new InMemoryEntityCache(() -> realmId, configurationStore, metaStoreManager));
+          RealmState state =
+              new RealmState(
+                  metaStoreManager,
+                  () -> {
+                    return new GoogleSpannerBasePersistenceImpl(
+                        getSpanner(),
+                        getDatabaseId(),
+                        secretGenerators.get(realmId),
+                        polarisStorageIntegrationProvider);
+                  },
+                  new InMemoryEntityCache(() -> realmId, configurationStore, metaStoreManager));
+          if (!isBootstrap) {
+            checkBootstrapped(realmContext, state);
+          }
+          return state;
         });
+  }
+
+  private RealmState getOrCreateRealmState(RealmContext realmContext) {
+    return getOrCreateRealmState(realmContext, false);
   }
 
   @Override
@@ -143,12 +160,17 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
   public Map<String, PrincipalSecretsResult> bootstrapRealms(
       Iterable<String> realms, RootCredentialsSet rootCredentialsSet) {
     Map<String, PrincipalSecretsResult> results = new HashMap<>();
+
     for (String realmId : realms) {
+      // Arguably this is a bug in the purge admin test,
+      if (realmStateMap.containsKey(realmId)) {
+        continue;
+      }
       secretGenerators.put(
           realmId, PrincipalSecretsGenerator.bootstrap(realmId, rootCredentialsSet));
 
       RealmContext realmContext = () -> realmId;
-      RealmState state = getOrCreateRealmState(realmContext);
+      RealmState state = getOrCreateRealmState(realmContext, true);
 
       BasePersistence session = state.sessionSupplier().get();
       // Make sure we have a realm entry before continuing with the realm creation process
@@ -216,10 +238,66 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
           new PolarisCallContext(realmContext, state.sessionSupplier().get(), polarisDiagnostics);
       CallContext restore = CallContext.getCurrentContext();
       CallContext.setCurrentContext(callCtx);
-      results.put(realmId, getOrCreateMetaStoreManager(() -> realmId).purge(callCtx));
+      results.put(realmId, getOrCreateMetaStoreManager(realmContext).purge(callCtx));
       CallContext.setCurrentContext(restore);
     }
-    return results;
+    return Map.copyOf(results);
+  }
+
+  protected DatabaseId initializeSchema(DatabaseId databaseId) {
+    if (initialized) {
+      return databaseId;
+    }
+    if (googleCloudSpannerConfiguration.bootstrapSchema().orElse(false)) {
+      LOGGER.info("Attempting to bootstrap schema");
+      try (InputStream schemaStream =
+          getClass().getResourceAsStream("/org/apache/polaris/persistence/spanner/schema-v1.sql")) {
+        String schema = new String(schemaStream.readAllBytes(), Charset.forName("UTF-8"));
+        List<String> lines = new ArrayList<>();
+        for (String s : schema.split("\n")) {
+          s = s.trim();
+          if (s.startsWith("--") || s.length() == 0) {
+            continue;
+          }
+          lines.add(s);
+        }
+        lines = List.of(String.join(" ", lines).split(";"));
+        getSpanner()
+            .getDatabaseAdminClient()
+            .updateDatabaseDdl(
+                databaseId.getInstanceId().getInstance(), databaseId.getDatabase(), lines, null)
+            .get();
+      } catch (IOException | InterruptedException | ExecutionException e) {
+        throw new RuntimeException("Unable to bootstrap", e);
+      }
+    }
+    initialized = true;
+    return databaseId;
+  }
+
+  protected void checkBootstrapped(RealmContext realmContext, RealmState state) {
+    PolarisCallContext polarisContext =
+        new PolarisCallContext(realmContext, state.sessionSupplier().get(), polarisDiagnostics);
+    CallContext restore = CallContext.getCurrentContext();
+    CallContext.setCurrentContext(polarisContext);
+    EntityResult rootPrincipalLookup =
+        state
+            .metaStoreManager()
+            .readEntityByName(
+                polarisContext,
+                null,
+                PolarisEntityType.PRINCIPAL,
+                PolarisEntitySubType.NULL_SUBTYPE,
+                PolarisEntityConstants.getRootPrincipalName());
+    if (!rootPrincipalLookup.isSuccess()) {
+      // This exact format is needed to pass the purge tests.
+      LOGGER.error(
+          "\n\n Realm {} is not bootstrapped, could not load root principal. Please run Bootstrap command. \n\n",
+          realmContext.getRealmIdentifier());
+      throw new IllegalStateException(
+          "Realm is not bootstrapped, please run server in bootstrap mode.");
+    }
+    CallContext.setCurrentContext(restore);
   }
 
   /**

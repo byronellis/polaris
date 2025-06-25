@@ -24,9 +24,11 @@ import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeySet;
 import com.google.cloud.spanner.Mutation;
+import com.google.cloud.spanner.ReadOnlyTransaction;
 import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.Statement;
+import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TransactionContext;
 import com.google.cloud.spanner.TransactionRunner;
 import com.google.common.collect.ImmutableList;
@@ -265,19 +267,27 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   @Override
   public PolarisBaseEntity lookupEntityByName(
       PolarisCallContext callCtx, long catalogId, long parentId, int typeCode, String name) {
-    return Entity.fromStruct(
-        client()
-            .readOnlyTransaction()
-            .readRowUsingIndex(
-                Entity.TABLE_NAME,
-                Entity.NAME_LOOKUP_INDEX,
-                Entity.namedEntityKey(
-                    callCtx.getRealmContext().getRealmIdentifier(),
-                    catalogId,
-                    parentId,
-                    typeCode,
-                    name),
-                Entity.TABLE_COLUMNS));
+    try (ReadOnlyTransaction txn = client().readOnlyTransaction()) {
+      Struct indexRead =
+          txn.readRowUsingIndex(
+              Entity.TABLE_NAME,
+              Entity.NAME_LOOKUP_INDEX,
+              Entity.namedEntityKey(
+                  callCtx.getRealmContext().getRealmIdentifier(),
+                  catalogId,
+                  parentId,
+                  typeCode,
+                  name),
+              ImmutableList.of("RealmId", "Id"));
+      if (indexRead == null) {
+        return null;
+      }
+      return Entity.fromStruct(
+          txn.readRow(
+              Entity.TABLE_NAME,
+              Entity.toKey(indexRead.getString(0), indexRead.getLong(1)),
+              Entity.TABLE_COLUMNS));
+    }
   }
 
   protected KeySet entityKeySet(String realmId, Iterable<PolarisEntityId> entityIds) {

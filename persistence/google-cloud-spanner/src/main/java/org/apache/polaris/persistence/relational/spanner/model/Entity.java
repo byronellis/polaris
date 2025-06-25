@@ -29,6 +29,7 @@ import com.google.cloud.spanner.KeyRange;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
+import com.google.cloud.spanner.Value;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
@@ -39,6 +40,7 @@ import org.apache.polaris.core.entity.PolarisEntityType;
 import org.apache.polaris.core.persistence.pagination.HasPageOffset;
 import org.apache.polaris.core.persistence.pagination.HasPageSize;
 import org.apache.polaris.core.persistence.pagination.PageToken;
+import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 
 public final class Entity {
 
@@ -109,13 +111,14 @@ public final class Entity {
             PolarisEntityType.fromCode((int) result.getLong("TypeCode")),
             PolarisEntitySubType.fromCode((int) result.getLong("SubTypeCode")),
             result.getLong("ParentId"),
-            result.getString("Name"));
+            result.isNull("Name") ? null : result.getString("Name"));
     // No constructor for these so set them manually
     entity.setCreateTimestamp(result.getLong("CreateTimestamp"));
     entity.setDropTimestamp(result.getLong("DropTimestamp"));
     entity.setPurgeTimestamp(result.getLong("PurgeTimestamp"));
     entity.setToPurgeTimestamp(result.getLong("ToPurgeTimestamp"));
     entity.setLastUpdateTimestamp(result.getLong("LastUpdateTimestamp"));
+
     entity.setProperties(result.getJson("Properties"));
     entity.setInternalProperties(result.getJson("InternalProperties"));
     entity.setGrantRecordsVersion((int) result.getLong("GrantRecordsVersion"));
@@ -132,6 +135,8 @@ public final class Entity {
         .to(entity.getId())
         .set("ParentId")
         .to(entity.getParentId())
+        .set("Name")
+        .to(Value.string(entity.getName()))
         .set("EntityVersion")
         .to(entity.getEntityVersion())
         .set("TypeCode")
@@ -149,9 +154,9 @@ public final class Entity {
         .set("LastUpdateTimestamp")
         .to(entity.getLastUpdateTimestamp())
         .set("Properties")
-        .to(entity.getProperties())
+        .to(SpannerUtil.jsonValue(entity.getPropertiesAsMap()))
         .set("InternalProperties")
-        .to(entity.getInternalProperties())
+        .to(SpannerUtil.jsonValue(entity.getInternalPropertiesAsMap()))
         .set("GrantRecordsVersion")
         .to(entity.getGrantRecordsVersion())
         .build();

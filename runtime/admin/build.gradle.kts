@@ -36,6 +36,7 @@ dependencies {
   runtimeOnly(project(":polaris-eclipselink"))
   runtimeOnly(project(":polaris-relational-jdbc"))
   runtimeOnly("org.postgresql:postgresql")
+  runtimeOnly(project(":polaris-google-cloud-spanner"))
 
   implementation("io.quarkus:quarkus-jdbc-postgresql")
   implementation(enforcedPlatform(libs.quarkus.bom))
