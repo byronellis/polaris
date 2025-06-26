@@ -19,20 +19,12 @@
 
 package org.apache.polaris.persistence.relational.spanner;
 
-import com.google.cloud.spanner.DatabaseId;
-import com.google.cloud.spanner.Spanner;
+import com.google.cloud.spanner.DatabaseClient;
 import io.smallrye.common.annotation.Identifier;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.PolarisDiagnostics;
@@ -56,7 +48,6 @@ import org.apache.polaris.core.persistence.dao.entity.EntityResult;
 import org.apache.polaris.core.persistence.dao.entity.PrincipalSecretsResult;
 import org.apache.polaris.core.storage.PolarisStorageIntegrationProvider;
 import org.apache.polaris.core.storage.cache.StorageCredentialCache;
-import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,31 +71,7 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
 
   protected GoogleCloudSpannerMetaStoreManagerFactory() {}
 
-  protected boolean initialized = false;
-
-  protected AtomicReference<Spanner> spannerReference = new AtomicReference<>(null);
-  protected AtomicReference<DatabaseId> databaseIdAtomicReference = new AtomicReference<>(null);
-
-  protected Spanner getSpanner() {
-    return spannerReference.updateAndGet(
-        current -> {
-          if (current == null) {
-            return SpannerUtil.spannerFromConfiguration(googleCloudSpannerConfiguration);
-          }
-          return current;
-        });
-  }
-
-  protected DatabaseId getDatabaseId() {
-    return databaseIdAtomicReference.updateAndGet(
-        current -> {
-          if (current == null) {
-            return initializeSchema(
-                SpannerUtil.databaseFromConfiguration(googleCloudSpannerConfiguration));
-          }
-          return current;
-        });
-  }
+  @Inject protected Supplier<DatabaseClient> clientSupplier;
 
   private RealmState getOrCreateRealmState(RealmContext realmContext, boolean isBootstrap) {
     return realmStateMap.computeIfAbsent(
@@ -117,8 +84,7 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
                   metaStoreManager,
                   () -> {
                     return new GoogleSpannerBasePersistenceImpl(
-                        getSpanner(),
-                        getDatabaseId(),
+                        clientSupplier,
                         secretGenerators.get(realmId),
                         polarisStorageIntegrationProvider);
                   },
@@ -242,37 +208,6 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
       CallContext.setCurrentContext(restore);
     }
     return Map.copyOf(results);
-  }
-
-  protected DatabaseId initializeSchema(DatabaseId databaseId) {
-    if (initialized) {
-      return databaseId;
-    }
-    if (googleCloudSpannerConfiguration.bootstrapSchema().orElse(false)) {
-      LOGGER.info("Attempting to bootstrap schema");
-      try (InputStream schemaStream =
-          getClass().getResourceAsStream("/org/apache/polaris/persistence/spanner/schema-v1.sql")) {
-        String schema = new String(schemaStream.readAllBytes(), Charset.forName("UTF-8"));
-        List<String> lines = new ArrayList<>();
-        for (String s : schema.split("\n")) {
-          s = s.trim();
-          if (s.startsWith("--") || s.length() == 0) {
-            continue;
-          }
-          lines.add(s);
-        }
-        lines = List.of(String.join(" ", lines).split(";"));
-        getSpanner()
-            .getDatabaseAdminClient()
-            .updateDatabaseDdl(
-                databaseId.getInstanceId().getInstance(), databaseId.getDatabase(), lines, null)
-            .get();
-      } catch (IOException | InterruptedException | ExecutionException e) {
-        throw new RuntimeException("Unable to bootstrap", e);
-      }
-    }
-    initialized = true;
-    return databaseId;
   }
 
   protected void checkBootstrapped(RealmContext realmContext, RealmState state) {

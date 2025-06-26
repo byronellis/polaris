@@ -21,12 +21,23 @@ package org.apache.polaris.persistence.relational.spanner.util;
 
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 
 public class Modifier<T> {
   T wrapped;
 
   protected Modifier(T wrapped) {
     this.wrapped = wrapped;
+  }
+
+  public Modifier<T> apply(Function<T, T> fn) {
+    wrapped = fn.apply(wrapped);
+    return this;
+  }
+
+  public <V> Modifier<T> orElse(Optional<V> toApply, V other, BiFunction<T, V, T> fn) {
+    wrapped = fn.apply(wrapped, toApply.orElse(other));
+    return this;
   }
 
   public <V> Modifier<T> ifPresent(Optional<V> toApply, BiFunction<T, V, T> fn) {

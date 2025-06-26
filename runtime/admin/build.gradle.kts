@@ -56,6 +56,7 @@ dependencies {
   testFixturesApi(platform(libs.testcontainers.bom))
   testFixturesApi("org.testcontainers:testcontainers")
   testFixturesApi("org.testcontainers:postgresql")
+  testFixturesApi("org.testcontainers:gcloud")
 
   testRuntimeOnly(project(":polaris-eclipselink"))
   testRuntimeOnly("org.postgresql:postgresql")

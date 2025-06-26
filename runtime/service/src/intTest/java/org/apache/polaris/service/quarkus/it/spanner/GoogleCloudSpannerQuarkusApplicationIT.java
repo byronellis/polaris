@@ -17,19 +17,13 @@
  * under the License.
  */
 
-package org.apache.polaris.persistence.relational.spanner;
+package org.apache.polaris.service.quarkus.it.spanner;
 
-import java.util.Optional;
+import io.quarkus.test.junit.QuarkusIntegrationTest;
+import io.quarkus.test.junit.TestProfile;
+import org.apache.polaris.service.it.test.PolarisApplicationIntegrationTest;
+import org.apache.polaris.test.commons.GoogleCloudSpannerProfile;
 
-public interface GoogleCloudSpannerConfiguration {
-
-  public Optional<String> projectId();
-
-  public Optional<String> instanceId();
-
-  public Optional<String> databaseId();
-
-  public Optional<String> emulatorHost();
-
-  public Optional<Boolean> initializeDdl();
-}
+@TestProfile(GoogleCloudSpannerProfile.class)
+@QuarkusIntegrationTest
+public class GoogleCloudSpannerQuarkusApplicationIT extends PolarisApplicationIntegrationTest {}

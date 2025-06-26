@@ -29,6 +29,10 @@ import com.google.cloud.spanner.SpannerOptions;
 import com.google.common.collect.ImmutableList;
 import io.quarkus.test.common.DevServicesContext;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
+import io.smallrye.common.annotation.Identifier;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import org.slf4j.Logger;
@@ -44,10 +48,19 @@ public class GoogleCloudSpannerLifeCycleManagement
 
   private SpannerEmulatorContainer spannerContainer;
 
-  @Override
-  public void setIntegrationTestContext(DevServicesContext context) {}
+  private DevServicesContext context;
 
-  public GoogleCloudSpannerLifeCycleManagement() {}
+  @Inject
+  @Identifier("google-cloud-spanner-ddl")
+  Instance<List<String>> ddl;
+
+  @Override
+  public void setIntegrationTestContext(DevServicesContext context) {
+    this.context = context;
+  }
+
+  public GoogleCloudSpannerLifeCycleManagement() {
+  }
 
   @Override
   public Map<String, String> start() {
@@ -83,7 +96,7 @@ public class GoogleCloudSpannerLifeCycleManagement
           .createDatabase(
               databaseId.getInstanceId().getInstance(),
               databaseId.getDatabase(),
-              ImmutableList.of())
+              ddl == null ? ImmutableList.of() : ddl.get())
           .get();
     } catch (InterruptedException | ExecutionException e) {
       throw new RuntimeException("Unable to initialize Spanner Emulator", e);
@@ -92,14 +105,22 @@ public class GoogleCloudSpannerLifeCycleManagement
     return Map.of(
         "polaris.persistence.type",
         "google-cloud-spanner",
+        "polaris.persistence.spanner.initialize-ddl",
+        "true",
         "polaris.persistence.spanner.emulator-host",
         spannerContainer.getEmulatorGrpcEndpoint(),
         "polaris.persistence.spanner.database-id",
-        databaseId.getName(),
-        "polaris.persistence.spanner.bootstrap-schema",
-        "true");
+        databaseId.getName());
   }
 
   @Override
-  public void stop() {}
+  public void stop() {
+    if (spannerContainer != null) {
+      try {
+        spannerContainer.stop();
+      } finally {
+        spannerContainer = null;
+      }
+    }
+  }
 }

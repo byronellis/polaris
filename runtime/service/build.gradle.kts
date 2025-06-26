@@ -114,6 +114,9 @@ dependencies {
     exclude(group = "org.scala-lang", module = "scala-library")
     exclude(group = "org.scala-lang", module = "scala-reflect")
   }
+
+  runtimeOnly(project(":polaris-google-cloud-spanner"))
+
   testImplementation(platform(libs.quarkus.bom))
   testImplementation("io.quarkus:quarkus-junit5")
   testImplementation("io.quarkus:quarkus-junit5-mockito")
@@ -130,6 +133,7 @@ dependencies {
   testImplementation(platform(libs.testcontainers.bom))
   testImplementation("org.testcontainers:testcontainers")
   testImplementation("org.testcontainers:postgresql")
+  testImplementation("org.testcontainers:gcloud")
   testImplementation("org.postgresql:postgresql")
 }
 

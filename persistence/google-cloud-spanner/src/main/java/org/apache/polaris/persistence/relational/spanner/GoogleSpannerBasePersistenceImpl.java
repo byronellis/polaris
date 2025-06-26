@@ -20,13 +20,11 @@
 package org.apache.polaris.persistence.relational.spanner;
 
 import com.google.cloud.spanner.DatabaseClient;
-import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeySet;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.ReadOnlyTransaction;
 import com.google.cloud.spanner.ResultSet;
-import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TransactionContext;
@@ -38,6 +36,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.entity.EntityNameLookupRecord;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
@@ -59,6 +58,7 @@ import org.apache.polaris.core.persistence.pagination.LimitPageToken;
 import org.apache.polaris.core.persistence.pagination.OffsetLimitPageToken;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
+import org.apache.polaris.core.policy.PolarisPolicyMappingRecord;
 import org.apache.polaris.core.storage.PolarisStorageConfigurationInfo;
 import org.apache.polaris.core.storage.PolarisStorageIntegration;
 import org.apache.polaris.core.storage.PolarisStorageIntegrationProvider;
@@ -79,27 +79,23 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
   private static final String ENTITY_TABLE_NAME = "Entities";
 
-  private final Spanner spanner;
-
-  private final DatabaseId databaseId;
+  private final Supplier<DatabaseClient> clientSupplier;
 
   private final PrincipalSecretsGenerator secretsGenerator;
 
   private final PolarisStorageIntegrationProvider storageIntegrationProvider;
 
   public GoogleSpannerBasePersistenceImpl(
-      Spanner spanner,
-      DatabaseId databaseId,
+      Supplier<DatabaseClient> clientSupplier,
       PrincipalSecretsGenerator secretsGenerator,
       PolarisStorageIntegrationProvider storageIntegrationProvider) {
-    this.spanner = spanner;
-    this.databaseId = databaseId;
+    this.clientSupplier = clientSupplier;
     this.secretsGenerator = secretsGenerator;
     this.storageIntegrationProvider = storageIntegrationProvider;
   }
 
   protected DatabaseClient client() {
-    return spanner.getDatabaseClient(databaseId);
+    return clientSupplier.get();
   }
 
   protected TransactionRunner readWriteTransaction() {
@@ -632,5 +628,49 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
   protected void bootstrapRealm(String realmId) {
     client().write(ImmutableList.of(Realm.upsert(realmId)));
+  }
+
+  @Override
+  public void writeToPolicyMappingRecords(
+      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {}
+
+  @Override
+  public void deleteFromPolicyMappingRecords(
+      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {}
+
+  @Override
+  public void deleteAllEntityPolicyMappingRecords(
+      PolarisCallContext callCtx,
+      PolarisBaseEntity entity,
+      List<PolarisPolicyMappingRecord> mappingOnTarget,
+      List<PolarisPolicyMappingRecord> mappingOnPolicy) {}
+
+  @Override
+  public PolarisPolicyMappingRecord lookupPolicyMappingRecord(
+      PolarisCallContext callCtx,
+      long targetCatalogId,
+      long targetId,
+      int policyTypeCode,
+      long policyCatalogId,
+      long policyId) {
+    return null;
+  }
+
+  @Override
+  public List<PolarisPolicyMappingRecord> loadPoliciesOnTargetByType(
+      PolarisCallContext callCtx, long targetCatalogId, long targetId, int policyTypeCode) {
+    return null;
+  }
+
+  @Override
+  public List<PolarisPolicyMappingRecord> loadAllPoliciesOnTarget(
+      PolarisCallContext callCtx, long targetCatalogId, long targetId) {
+    return null;
+  }
+
+  @Override
+  public List<PolarisPolicyMappingRecord> loadAllTargetsOnPolicy(
+      PolarisCallContext callCtx, long policyCatalogId, long policyId, int policyTypeCode) {
+    return null;
   }
 }
