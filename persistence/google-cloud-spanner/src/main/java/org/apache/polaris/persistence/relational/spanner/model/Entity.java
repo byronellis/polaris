@@ -114,6 +114,7 @@ public final class Entity {
             result.getLong("ParentId"),
             result.isNull("Name") ? null : result.getString("Name"));
     // No constructor for these so set them manually
+    entity.setEntityVersion((int) result.getLong("EntityVersion"));
     entity.setCreateTimestamp(result.getLong("CreateTimestamp"));
     entity.setDropTimestamp(result.getLong("DropTimestamp"));
     entity.setPurgeTimestamp(result.getLong("PurgeTimestamp"));
@@ -139,11 +140,11 @@ public final class Entity {
         .set("Name")
         .to(Value.string(entity.getName()))
         .set("EntityVersion")
-        .to(entity.getEntityVersion())
+        .to((long) entity.getEntityVersion())
         .set("TypeCode")
-        .to(entity.getTypeCode())
+        .to((long) entity.getTypeCode())
         .set("SubTypeCode")
-        .to(entity.getSubTypeCode())
+        .to((long) entity.getSubTypeCode())
         .set("CreateTimestamp")
         .to(entity.getCreateTimestamp())
         .set("DropTimestamp")
@@ -159,7 +160,7 @@ public final class Entity {
         .set("InternalProperties")
         .to(SpannerUtil.jsonValue(entity.getInternalPropertiesAsMap()))
         .set("GrantRecordsVersion")
-        .to(entity.getGrantRecordsVersion())
+        .to((long) entity.getGrantRecordsVersion())
         .build();
   }
 

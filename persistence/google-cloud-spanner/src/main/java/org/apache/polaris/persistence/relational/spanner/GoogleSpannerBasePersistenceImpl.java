@@ -22,11 +22,13 @@ package org.apache.polaris.persistence.relational.spanner;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.asStream;
 
 import com.google.cloud.spanner.DatabaseClient;
+import com.google.cloud.spanner.ErrorCode;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeySet;
 import com.google.cloud.spanner.Options;
 import com.google.cloud.spanner.ReadOnlyTransaction;
 import com.google.cloud.spanner.ResultSet;
+import com.google.cloud.spanner.SpannerException;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TransactionContext;
@@ -51,6 +53,7 @@ import org.apache.polaris.core.entity.PolarisGrantRecord;
 import org.apache.polaris.core.entity.PolarisPrincipalSecrets;
 import org.apache.polaris.core.persistence.BaseMetaStoreManager;
 import org.apache.polaris.core.persistence.BasePersistence;
+import org.apache.polaris.core.persistence.EntityAlreadyExistsException;
 import org.apache.polaris.core.persistence.IntegrationPersistence;
 import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
 import org.apache.polaris.core.persistence.RetryOnConcurrencyException;
@@ -80,8 +83,6 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       LoggerFactory.getLogger(GoogleSpannerBasePersistenceImpl.class);
   private static final Statement GET_NEXT_ID_STMT =
       Statement.of("SELECT GET_NEXT_SEQUENCE_VALUE(SEQUENCE Ids) AS next_value");
-
-  private static final String ENTITY_TABLE_NAME = "Entities";
 
   private final Supplier<DatabaseClient> clientSupplier;
 
@@ -118,22 +119,26 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
         .orElseThrow();
   }
 
-  protected void checkEntityVersion(
+  protected boolean checkEntityVersion(
       TransactionContext txn, String realmId, PolarisEntityCore entity)
       throws RetryOnConcurrencyException {
     // No need to check for a version if the entity is null.
     if (entity == null) {
-      return;
+      return true;
     }
     Long currentVersion =
         txn.readRow(
                 Entity.TABLE_NAME, Entity.toKey(realmId, entity), ImmutableList.of("EntityVersion"))
             .getLong(0);
     if (currentVersion == null || currentVersion != entity.getEntityVersion()) {
-      throw new RetryOnConcurrencyException(
-          "Entity '%s' id '%s' concurrently modified; expected version %s",
-          entity.getName(), entity.getId(), entity.getEntityVersion());
+      LOGGER.warn(
+          "Entity version mismatch for {}. Expected {} got {}",
+          entity.getId(),
+          entity.getEntityVersion(),
+          currentVersion);
+      return false;
     }
+    return true;
   }
 
   protected <T extends PolarisEntityCore> void checkEntityVersions(
@@ -151,6 +156,11 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
     for (PolarisEntityCore entity : toCheck) {
       Long currentVersion = versions.get(entity.getId());
       if (currentVersion == null || currentVersion != entity.getEntityVersion()) {
+        LOGGER.warn(
+            "Entity version mismatch for {}. Expected {} got {}",
+            entity.getId(),
+            entity.getEntityVersion(),
+            currentVersion);
         throw new RetryOnConcurrencyException(
             "Entity '%s' id '%s' concurrently modified; expected version %s",
             entity.getName(), entity.getId(), entity.getEntityVersion());
@@ -164,20 +174,43 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       PolarisBaseEntity entity,
       boolean nameOrParentChanged,
       PolarisBaseEntity originalEntity) {
-    if (originalEntity == null) {
-      client()
-          .write(
-              ImmutableList.of(
-                  Entity.upsert(callCtx.getRealmContext().getRealmIdentifier(), entity)));
-    } else {
-      readWriteTransaction()
-          .run(
-              txn -> {
-                checkEntityVersion(
-                    txn, callCtx.getRealmContext().getRealmIdentifier(), originalEntity);
-                txn.buffer(Entity.upsert(callCtx.getRealmContext().getRealmIdentifier(), entity));
-                return null;
-              });
+    String realmId = callCtx.getRealmContext().getRealmIdentifier();
+    try {
+      if (originalEntity == null) {
+        client().write(ImmutableList.of(Entity.upsert(realmId, entity)));
+      } else {
+        if (!readWriteTransaction()
+            .run(
+                txn -> {
+                  if (checkEntityVersion(txn, realmId, originalEntity)) {
+                    txn.buffer(Entity.upsert(realmId, entity));
+                    return true;
+                  }
+                  return false;
+                })) {
+          throw new RetryOnConcurrencyException(
+              "Entity '%s' id '%s' concurrently modified; expected version %s",
+              entity.getName(), entity.getId(), entity.getEntityVersion());
+        }
+      }
+    } catch (SpannerException e) {
+      if (e.getErrorCode() == ErrorCode.ALREADY_EXISTS) {
+        PolarisBaseEntity existingEntity =
+            lookupEntityByName(
+                callCtx,
+                entity.getCatalogId(),
+                entity.getParentId(),
+                entity.getTypeCode(),
+                entity.getName());
+        LOGGER.warn("Entity already exists {}", existingEntity);
+        throw new EntityAlreadyExistsException(existingEntity, e);
+      } else {
+        throw new RuntimeException(
+            String.format(
+                "Unable to write entity %s:%d",
+                callCtx.getRealmContext().getRealmIdentifier(), entity.getId()),
+            e);
+      }
     }
   }
 
@@ -192,16 +225,28 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
               ? null
               : originalEntities.get(idx);
         };
-    readWriteTransaction()
-        .run(
-            txn -> {
-              checkEntityVersions(
-                  txn, callCtx.getRealmContext().getRealmIdentifier(), originalEntities);
-              for (PolarisBaseEntity entity : entities) {
-                txn.buffer(Entity.upsert(callCtx.getRealmContext().getRealmIdentifier(), entity));
-              }
-              return null;
-            });
+    try {
+      readWriteTransaction()
+          .run(
+              txn -> {
+                checkEntityVersions(
+                    txn, callCtx.getRealmContext().getRealmIdentifier(), originalEntities);
+                for (PolarisBaseEntity entity : entities) {
+                  txn.buffer(Entity.upsert(callCtx.getRealmContext().getRealmIdentifier(), entity));
+                }
+                return null;
+              });
+    } catch (SpannerException e) {
+      if (e.getCause() instanceof RetryOnConcurrencyException) {
+        throw (RetryOnConcurrencyException) e.getCause();
+      } else {
+        throw new RuntimeException(
+            String.format(
+                "Unable to write entity batch in %s",
+                callCtx.getRealmContext().getRealmIdentifier()),
+            e);
+      }
+    }
   }
 
   @Override
@@ -256,7 +301,7 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
     PolarisBaseEntity entity =
         Entity.fromStruct(
             client()
-                .singleUseReadOnlyTransaction()
+                .singleUse()
                 .readRow(
                     Entity.TABLE_NAME,
                     Entity.toKey(callCtx.getRealmContext().getRealmIdentifier(), entityId),
