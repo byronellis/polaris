@@ -45,7 +45,7 @@ INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
 
 CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS EntityNameIndex ON Entities(RealmId,CatalogId,ParentId,TypeCode,Name);
 
-CREATE INDEX IF NOT EXISTS EntityChildrenIndex ON Entities(RealmId,ParentId);
+CREATE INDEX IF NOT EXISTS EntityChildrenIndex ON Entities(RealmId,ParentId, TypeCode);
 
 CREATE TABLE IF NOT EXISTS GrantRecords(
   RealmId STRING(MAX) NOT NULL,
@@ -70,7 +70,7 @@ PRIMARY KEY (RealmId,PrincipalClientId,PrincipalId),
 INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
 
 
-CREATE TABLE IF NOT EXISTS PolicyMappingRecord(
+CREATE TABLE IF NOT EXISTS PolicyMapping(
   RealmId STRING(MAX) NOT NULL,
   TargetCatalogId INT64 NOT NULL,
   TargetId INT64 NOT NULL,
@@ -80,3 +80,5 @@ CREATE TABLE IF NOT EXISTS PolicyMappingRecord(
   Parameters JSON)
 PRIMARY KEY (RealmId, TargetCatalogId, TargetId, PolicyTypeCode, PolicyCatalogId, PolicyId),
 INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS PolicyMappingPolicyIndex ON PolicyMapping(RealmId,PolicyCatalogId,PolicyId,PolicyTypeCode) STORING(Parameters);

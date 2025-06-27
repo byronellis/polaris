@@ -27,6 +27,7 @@ import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeyRange;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Struct;
+import com.google.cloud.spanner.StructReader;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.polaris.core.entity.PolarisPrincipalSecrets;
@@ -56,7 +57,7 @@ public final class PrincipalAuthenticationData {
     return KeyRange.prefix(Key.of(realmId, clientId));
   }
 
-  public static PolarisPrincipalSecrets fromStruct(Struct row) {
+  public static PolarisPrincipalSecrets fromStruct(StructReader row) {
     if (row == null) {
       return null;
     }

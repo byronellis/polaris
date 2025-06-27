@@ -25,16 +25,23 @@ import com.google.cloud.spanner.Dialect;
 import com.google.cloud.spanner.InstanceId;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeySet;
+import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
+import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Type;
 import com.google.cloud.spanner.Value;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import org.apache.polaris.persistence.relational.spanner.GoogleCloudSpannerConfiguration;
 
 public final class SpannerUtil {
@@ -118,5 +125,26 @@ public final class SpannerUtil {
         .get()
         .build()
         .getService();
+  }
+
+  public static Iterator<StructReader> asIterator(final ResultSet resultSet) {
+    return new Iterator<StructReader>() {
+
+      @Override
+      public boolean hasNext() {
+        return resultSet.next();
+      }
+
+      @Override
+      public StructReader next() {
+        return resultSet;
+      }
+    };
+  }
+
+  public static Stream<StructReader> asStream(final ResultSet resultSet) {
+
+    return StreamSupport.stream(
+        Spliterators.spliteratorUnknownSize(asIterator(resultSet), Spliterator.ORDERED), false);
   }
 }

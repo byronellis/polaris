@@ -19,10 +19,12 @@
 
 package org.apache.polaris.persistence.relational.spanner;
 
+import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.asStream;
+
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeySet;
-import com.google.cloud.spanner.Mutation;
+import com.google.cloud.spanner.Options;
 import com.google.cloud.spanner.ReadOnlyTransaction;
 import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.Statement;
@@ -33,6 +35,7 @@ import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -64,6 +67,7 @@ import org.apache.polaris.core.storage.PolarisStorageIntegration;
 import org.apache.polaris.core.storage.PolarisStorageIntegrationProvider;
 import org.apache.polaris.persistence.relational.spanner.model.Entity;
 import org.apache.polaris.persistence.relational.spanner.model.GrantRecord;
+import org.apache.polaris.persistence.relational.spanner.model.PolicyMapping;
 import org.apache.polaris.persistence.relational.spanner.model.PrincipalAuthenticationData;
 import org.apache.polaris.persistence.relational.spanner.model.Realm;
 import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
@@ -221,9 +225,7 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
     client()
         .write(
             ImmutableList.of(
-                Mutation.delete(
-                    GrantRecord.TABLE_NAME,
-                    GrantRecord.toKey(callCtx.getRealmContext().getRealmIdentifier(), grantRec))));
+                GrantRecord.delete(callCtx.getRealmContext().getRealmIdentifier(), grantRec)));
   }
 
   @Override
@@ -231,7 +233,15 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       PolarisCallContext callCtx,
       PolarisEntityCore entity,
       List<PolarisGrantRecord> grantsOnGrantee,
-      List<PolarisGrantRecord> grantsOnSecurable) {}
+      List<PolarisGrantRecord> grantsOnSecurable) {
+    String realmId = callCtx.getRealmContext().getRealmIdentifier();
+    client()
+        .write(
+            ImmutableList.of(grantsOnGrantee, grantsOnSecurable).stream()
+                .flatMap(List::stream)
+                .map(e -> GrantRecord.delete(realmId, e))
+                .toList());
+  }
 
   @Override
   public void deleteAll(PolarisCallContext callCtx) {
@@ -246,7 +256,7 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
     PolarisBaseEntity entity =
         Entity.fromStruct(
             client()
-                .readOnlyTransaction()
+                .singleUseReadOnlyTransaction()
                 .readRow(
                     Entity.TABLE_NAME,
                     Entity.toKey(callCtx.getRealmContext().getRealmIdentifier(), entityId),
@@ -297,6 +307,7 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   @Override
   public List<PolarisBaseEntity> lookupEntities(
       PolarisCallContext callCtx, List<PolarisEntityId> entityIds) {
+
     List<PolarisBaseEntity> entities = new ArrayList<>();
     try (ResultSet results =
         client()
@@ -315,20 +326,23 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   @Override
   public List<PolarisChangeTrackingVersions> lookupEntityVersions(
       PolarisCallContext callCtx, List<PolarisEntityId> entityIds) {
-    List<PolarisChangeTrackingVersions> versions = new ArrayList<>();
+    Map<Long, PolarisChangeTrackingVersions> versions = new HashMap<>();
     try (ResultSet results =
         client()
             .singleUse()
             .read(
                 Entity.TABLE_NAME,
                 entityKeySet(callCtx.getRealmContext().getRealmIdentifier(), entityIds),
-                ImmutableList.of(Entity.ENTITY_VERSION, Entity.GRANT_RECORDS_VERSION))) {
+                ImmutableList.of("Id", Entity.ENTITY_VERSION, Entity.GRANT_RECORDS_VERSION))) {
       while (results.next()) {
-        versions.add(
-            new PolarisChangeTrackingVersions((int) results.getLong(0), (int) results.getLong(1)));
+        versions.put(
+            results.getLong("Id"),
+            new PolarisChangeTrackingVersions(
+                (int) results.getLong(Entity.ENTITY_VERSION),
+                (int) results.getLong(Entity.GRANT_RECORDS_VERSION)));
       }
     }
-    return versions;
+    return entityIds.stream().map(e -> versions.get(e.getId())).toList();
   }
 
   @Override
@@ -382,7 +396,17 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       try (ResultSet result =
           client()
               .singleUseReadOnlyTransaction()
-              .executeQuery(Entity.listEntities(pageToken).build())) {
+              .executeQuery(
+                  Entity.listEntities(pageToken)
+                      .bind("realmId")
+                      .to(callCtx.getRealmContext().getRealmIdentifier())
+                      .bind("catalogId")
+                      .to(catalogId)
+                      .bind("parentId")
+                      .to(parentId)
+                      .bind("typeCode")
+                      .to(entityType.getCode())
+                      .build())) {
         while (result.next()) {
           rawReads++;
           PolarisBaseEntity entity = Entity.fromStruct(result.getCurrentRowAsStruct());
@@ -497,14 +521,32 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       long catalogId,
       long parentId) {
     // If we get any results here we have at least one child
-    return client()
-            .singleUse()
-            .readRowUsingIndex(
-                Entity.TABLE_NAME,
-                Entity.CHILDREN_INDEX,
-                Key.of(callContext.getRealmContext().getRealmIdentifier(), parentId),
-                ImmutableList.of("Id"))
-        != null;
+    if (optionalEntityType == null) {
+      // If we are not looking for a particular type read from a prefix key range but limit to
+      // a single result since we just care if this is > 0;
+      return client()
+          .singleUse()
+          .readUsingIndex(
+              Entity.TABLE_NAME,
+              Entity.CHILDREN_INDEX,
+              KeySet.prefixRange(
+                  Key.of(callContext.getRealmContext().getRealmIdentifier(), parentId)),
+              ImmutableList.of("Id"),
+              Options.limit(1))
+          .next();
+    } else {
+      return client()
+              .singleUse()
+              .readRowUsingIndex(
+                  Entity.TABLE_NAME,
+                  Entity.CHILDREN_INDEX,
+                  Key.of(
+                      callContext.getRealmContext().getRealmIdentifier(),
+                      parentId,
+                      optionalEntityType.getCode()),
+                  ImmutableList.of("Id"))
+          != null;
+    }
   }
 
   @Override
@@ -632,11 +674,21 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
   @Override
   public void writeToPolicyMappingRecords(
-      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {}
+      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {
+    client()
+        .write(
+            ImmutableList.of(
+                PolicyMapping.upsert(callCtx.getRealmContext().getRealmIdentifier(), record)));
+  }
 
   @Override
   public void deleteFromPolicyMappingRecords(
-      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {}
+      PolarisCallContext callCtx, PolarisPolicyMappingRecord record) {
+    client()
+        .write(
+            ImmutableList.of(
+                PolicyMapping.delete(callCtx.getRealmContext().getRealmIdentifier(), record)));
+  }
 
   @Override
   public void deleteAllEntityPolicyMappingRecords(
@@ -653,24 +705,82 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       int policyTypeCode,
       long policyCatalogId,
       long policyId) {
-    return null;
+    LOGGER.debug(
+        "Policy lookup {}/{}/{} {}/{}",
+        targetCatalogId,
+        targetId,
+        policyTypeCode,
+        policyCatalogId,
+        policyId);
+    return PolicyMapping.fromStruct(
+        client()
+            .singleUseReadOnlyTransaction()
+            .readRow(
+                PolicyMapping.TABLE_NAME,
+                PolicyMapping.toKey(
+                    callCtx.getRealmContext().getRealmIdentifier(),
+                    targetCatalogId,
+                    targetId,
+                    policyTypeCode,
+                    policyCatalogId,
+                    policyId),
+                PolicyMapping.TABLE_COLUMNS));
   }
 
   @Override
   public List<PolarisPolicyMappingRecord> loadPoliciesOnTargetByType(
       PolarisCallContext callCtx, long targetCatalogId, long targetId, int policyTypeCode) {
-    return null;
+    return asStream(
+            client()
+                .singleUseReadOnlyTransaction()
+                .read(
+                    PolicyMapping.TABLE_NAME,
+                    KeySet.range(
+                        PolicyMapping.toKeyRange(
+                            callCtx.getRealmContext().getRealmIdentifier(),
+                            targetCatalogId,
+                            targetId,
+                            policyTypeCode)),
+                    PolicyMapping.TABLE_COLUMNS))
+        .map(PolicyMapping::fromStruct)
+        .toList();
   }
 
   @Override
   public List<PolarisPolicyMappingRecord> loadAllPoliciesOnTarget(
       PolarisCallContext callCtx, long targetCatalogId, long targetId) {
-    return null;
+    return asStream(
+            client()
+                .singleUseReadOnlyTransaction()
+                .read(
+                    PolicyMapping.TABLE_NAME,
+                    KeySet.range(
+                        PolicyMapping.toKeyRange(
+                            callCtx.getRealmContext().getRealmIdentifier(),
+                            targetCatalogId,
+                            targetId)),
+                    PolicyMapping.TABLE_COLUMNS))
+        .map(PolicyMapping::fromStruct)
+        .toList();
   }
 
   @Override
   public List<PolarisPolicyMappingRecord> loadAllTargetsOnPolicy(
       PolarisCallContext callCtx, long policyCatalogId, long policyId, int policyTypeCode) {
-    return null;
+    return asStream(
+            client()
+                .singleUseReadOnlyTransaction()
+                .readUsingIndex(
+                    PolicyMapping.TABLE_NAME,
+                    PolicyMapping.POLICY_INDEX,
+                    KeySet.singleKey(
+                        Key.of(
+                            callCtx.getRealmContext().getRealmIdentifier(),
+                            policyTypeCode,
+                            policyCatalogId,
+                            policyId)),
+                    PolicyMapping.TABLE_COLUMNS))
+        .map(PolicyMapping::fromStruct)
+        .toList();
   }
 }

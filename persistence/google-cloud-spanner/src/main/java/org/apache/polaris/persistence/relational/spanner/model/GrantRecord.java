@@ -27,6 +27,7 @@ import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.KeyRange;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Struct;
+import com.google.cloud.spanner.StructReader;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.apache.polaris.core.entity.PolarisGrantRecord;
@@ -105,7 +106,7 @@ public final class GrantRecord {
     return delete(TABLE_NAME, realmId, grantRecord);
   }
 
-  public static PolarisGrantRecord fromStruct(Struct row) {
+  public static PolarisGrantRecord fromStruct(StructReader row) {
     return new PolarisGrantRecord(
         row.getLong("SecurableCatalogId"),
         row.getLong("SecurableId"),

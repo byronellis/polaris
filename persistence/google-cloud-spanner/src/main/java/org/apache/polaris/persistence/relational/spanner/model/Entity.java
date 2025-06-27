@@ -29,6 +29,7 @@ import com.google.cloud.spanner.KeyRange;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.Struct;
+import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Value;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
@@ -98,7 +99,7 @@ public final class Entity {
     return Key.of(realmId, catalogId, parentId, typeCode, name);
   }
 
-  public static PolarisBaseEntity fromStruct(Struct result) {
+  public static PolarisBaseEntity fromStruct(StructReader result) {
     if (result == null) {
       return null;
     }
@@ -198,8 +199,8 @@ public final class Entity {
                 "CatalogId = @catalogId",
                 "ParentId = @parentId",
                 "TypeCode = @typeCode"),
+            OrderClause,
             LimitClause,
-            OffsetClause,
-            OrderClause));
+            OffsetClause));
   }
 }

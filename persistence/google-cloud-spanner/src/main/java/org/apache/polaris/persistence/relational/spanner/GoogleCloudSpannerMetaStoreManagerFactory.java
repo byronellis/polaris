@@ -128,10 +128,14 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
     Map<String, PrincipalSecretsResult> results = new HashMap<>();
 
     for (String realmId : realms) {
-      // Arguably this is a bug in the purge admin test,
+      // Some of the tests expect realm bootstrapping to be idempotent with respect to a
+      // factory. This may not be what we want, but it's the semantic echoed in all existing
+      // persistence implementations.
       if (realmStateMap.containsKey(realmId)) {
+        LOGGER.info("Realm {} has already been bootstrapped by this factory. Skipping.", realmId);
         continue;
       }
+
       secretGenerators.put(
           realmId, PrincipalSecretsGenerator.bootstrap(realmId, rootCredentialsSet));
 
@@ -187,6 +191,9 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
                         .getInternalPropertiesAsMap()
                         .get(PolarisEntityConstants.getClientIdPropertyName()));
         results.put(realmId, secrets);
+        LOGGER.info("Successfully bootstrapped realm {}", realmId);
+      } else {
+        LOGGER.info("Failed to bootstrap realm {}", realmId);
       }
       CallContext.setCurrentContext(restore);
     }

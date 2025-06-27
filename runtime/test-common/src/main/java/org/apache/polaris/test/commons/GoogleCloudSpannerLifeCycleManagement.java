@@ -29,10 +29,6 @@ import com.google.cloud.spanner.SpannerOptions;
 import com.google.common.collect.ImmutableList;
 import io.quarkus.test.common.DevServicesContext;
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
-import io.smallrye.common.annotation.Identifier;
-import jakarta.enterprise.inject.Instance;
-import jakarta.inject.Inject;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import org.slf4j.Logger;
@@ -50,37 +46,48 @@ public class GoogleCloudSpannerLifeCycleManagement
 
   private DevServicesContext context;
 
-  @Inject
-  @Identifier("google-cloud-spanner-ddl")
-  Instance<List<String>> ddl;
-
   @Override
   public void setIntegrationTestContext(DevServicesContext context) {
     this.context = context;
   }
 
-  public GoogleCloudSpannerLifeCycleManagement() {
-  }
+  public GoogleCloudSpannerLifeCycleManagement() {}
 
   @Override
   public Map<String, String> start() {
-    spannerContainer =
-        new SpannerEmulatorContainer(
-            DockerImageName.parse("gcr.io/cloud-spanner-emulator/emulator"));
-    spannerContainer.start();
+    String emulatorEndpoint = System.getenv("SPANNER_EMULATOR_HOST");
+    String instanceName = "test-instance";
+    String databaseName = "test-database";
+
+    if (emulatorEndpoint == null) {
+      spannerContainer =
+          new SpannerEmulatorContainer(
+              DockerImageName.parse("gcr.io/cloud-spanner-emulator/emulator"));
+      spannerContainer.start();
+      emulatorEndpoint = spannerContainer.getEmulatorGrpcEndpoint();
+    } else {
+      long id = System.currentTimeMillis();
+      instanceName = "instance-" + id;
+      databaseName = "db-" + id;
+      LOGGER.info(
+          "External emulator is being used: {}. Instance Id={}, Database Id={}",
+          emulatorEndpoint,
+          instanceName,
+          databaseName);
+    }
+
     Spanner spanner =
         SpannerOptions.newBuilder()
-            .setEmulatorHost(spannerContainer.getEmulatorGrpcEndpoint())
+            .setEmulatorHost(emulatorEndpoint)
             .setProjectId("emulator-project")
             .setCredentials(NoCredentials.getInstance())
             .build()
             .getService();
 
-    InstanceId instanceId = InstanceId.of("emulator-project", "test-instance");
-    DatabaseId databaseId = DatabaseId.of(instanceId, "test-database");
+    InstanceId instanceId = InstanceId.of("emulator-project", instanceName);
+    DatabaseId databaseId = DatabaseId.of(instanceId, databaseName);
 
     try {
-
       spanner
           .getInstanceAdminClient()
           .createInstance(
@@ -96,9 +103,14 @@ public class GoogleCloudSpannerLifeCycleManagement
           .createDatabase(
               databaseId.getInstanceId().getInstance(),
               databaseId.getDatabase(),
-              ddl == null ? ImmutableList.of() : ddl.get())
+              ImmutableList.of())
           .get();
+      LOGGER.info(
+          "Initialized Spanner Emulator at {} with database {}",
+          emulatorEndpoint,
+          databaseId.getName());
     } catch (InterruptedException | ExecutionException e) {
+      LOGGER.error("Unable to initialize Spanner Emulator", e);
       throw new RuntimeException("Unable to initialize Spanner Emulator", e);
     }
 
@@ -108,7 +120,7 @@ public class GoogleCloudSpannerLifeCycleManagement
         "polaris.persistence.spanner.initialize-ddl",
         "true",
         "polaris.persistence.spanner.emulator-host",
-        spannerContainer.getEmulatorGrpcEndpoint(),
+        emulatorEndpoint,
         "polaris.persistence.spanner.database-id",
         databaseId.getName());
   }

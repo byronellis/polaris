@@ -57,16 +57,18 @@ public class GoogleCloudSpannerDatabaseClientLifecycleManager {
     databaseId = SpannerUtil.databaseFromConfiguration(spannerConfiguration);
 
     if (spannerConfiguration.initializeDdl().orElse(false)) {
-      LOGGER.info("Attempting to initialize Spanner database DDL");
+      List<String> ddlStatements = getSpannerDatabaseDdl();
+      LOGGER.info(
+          "Attempting to initialize Spanner database DDL with {} statements,",
+          ddlStatements.size());
       DatabaseAdminClient client = spanner.getDatabaseAdminClient();
       Database dbInfo =
           client.newDatabaseBuilder(databaseId).setDialect(Dialect.GOOGLE_STANDARD_SQL).build();
       try {
-        spanner
-            .getDatabaseAdminClient()
-            .updateDatabaseDdl(dbInfo, getSpannerDatabaseDdl(), null)
-            .get();
+        spanner.getDatabaseAdminClient().updateDatabaseDdl(dbInfo, ddlStatements, null).get();
+        LOGGER.info("Successfully applied DDL update.");
       } catch (InterruptedException | ExecutionException e) {
+        LOGGER.error("Unable to update Spanner DDL.", e);
         throw new RuntimeException(
             "Unable to update Spanner DDL. Please disable this option for this database configuration.",
             e);
