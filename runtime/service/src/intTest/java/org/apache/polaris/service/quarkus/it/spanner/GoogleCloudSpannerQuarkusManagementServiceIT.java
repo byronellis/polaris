@@ -26,5 +26,5 @@ import org.apache.polaris.test.commons.GoogleCloudSpannerProfile;
 
 @TestProfile(GoogleCloudSpannerProfile.class)
 @QuarkusIntegrationTest
-public class GoogleCloudSpannerManagementServiceIT
+public class GoogleCloudSpannerQuarkusManagementServiceIT
     extends PolarisManagementServiceIntegrationTest {}
