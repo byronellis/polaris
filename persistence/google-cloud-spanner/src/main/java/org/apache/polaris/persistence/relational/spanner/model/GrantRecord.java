@@ -107,6 +107,9 @@ public final class GrantRecord {
   }
 
   public static PolarisGrantRecord fromStruct(StructReader row) {
+    if(row == null) {
+      return null;
+    }
     return new PolarisGrantRecord(
         row.getLong("SecurableCatalogId"),
         row.getLong("SecurableId"),
