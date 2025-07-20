@@ -26,6 +26,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.lang.reflect.Field;
@@ -94,8 +95,7 @@ import org.apache.iceberg.view.ViewMetadata;
 import org.apache.iceberg.view.ViewOperations;
 import org.apache.iceberg.view.ViewRepresentation;
 import org.apache.polaris.core.config.FeatureConfiguration;
-import org.apache.polaris.core.config.PolarisConfigurationStore;
-import org.apache.polaris.core.context.RealmContext;
+import org.apache.polaris.core.config.RealmConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -127,13 +127,10 @@ public class CatalogHandlerUtils {
   private final boolean rollbackCompactionEnabled;
 
   @Inject
-  public CatalogHandlerUtils(
-      RealmContext realmContext, PolarisConfigurationStore configurationStore) {
+  public CatalogHandlerUtils(RealmConfig realmConfig) {
     this(
-        configurationStore.getConfiguration(
-            realmContext, FeatureConfiguration.ICEBERG_COMMIT_MAX_RETRIES),
-        configurationStore.getConfiguration(
-            realmContext, FeatureConfiguration.ICEBERG_ROLLBACK_COMPACTION_ON_CONFLICTS));
+        realmConfig.getConfig(FeatureConfiguration.ICEBERG_COMMIT_MAX_RETRIES),
+        realmConfig.getConfig(FeatureConfiguration.ICEBERG_ROLLBACK_COMPACTION_ON_CONFLICTS));
   }
 
   @VisibleForTesting
@@ -164,12 +161,19 @@ public class CatalogHandlerUtils {
     }
   }
 
-  private <T> Pair<List<T>, String> paginate(List<T> list, String pageToken, int pageSize) {
+  private <T> Pair<List<T>, String> paginate(
+      List<T> list, @Nullable String pageToken, @Nullable Integer pageSize) {
+    if (pageToken == null) {
+      return Pair.of(list, null);
+    }
+
     int pageStart = INITIAL_PAGE_TOKEN.equals(pageToken) ? 0 : Integer.parseInt(pageToken);
     if (pageStart >= list.size()) {
       return Pair.of(Collections.emptyList(), null);
     }
 
+    // if pageSize is null, return the rest of the list
+    pageSize = pageSize == null ? list.size() : pageSize;
     int end = Math.min(pageStart + pageSize, list.size());
     List<T> subList = list.subList(pageStart, end);
     String nextPageToken = end >= list.size() ? null : String.valueOf(end);
@@ -189,7 +193,7 @@ public class CatalogHandlerUtils {
   }
 
   public ListNamespacesResponse listNamespaces(
-      SupportsNamespaces catalog, Namespace parent, String pageToken, String pageSize) {
+      SupportsNamespaces catalog, Namespace parent, String pageToken, Integer pageSize) {
     List<Namespace> results;
 
     if (parent.isEmpty()) {
@@ -198,7 +202,7 @@ public class CatalogHandlerUtils {
       results = catalog.listNamespaces(parent);
     }
 
-    Pair<List<Namespace>, String> page = paginate(results, pageToken, Integer.parseInt(pageSize));
+    Pair<List<Namespace>, String> page = paginate(results, pageToken, pageSize);
 
     return ListNamespacesResponse.builder()
         .addAll(page.first())
@@ -269,11 +273,10 @@ public class CatalogHandlerUtils {
   }
 
   public ListTablesResponse listTables(
-      Catalog catalog, Namespace namespace, String pageToken, String pageSize) {
+      Catalog catalog, Namespace namespace, String pageToken, Integer pageSize) {
     List<TableIdentifier> results = catalog.listTables(namespace);
 
-    Pair<List<TableIdentifier>, String> page =
-        paginate(results, pageToken, Integer.parseInt(pageSize));
+    Pair<List<TableIdentifier>, String> page = paginate(results, pageToken, pageSize);
 
     return ListTablesResponse.builder().addAll(page.first()).nextPageToken(page.second()).build();
   }
@@ -725,11 +728,10 @@ public class CatalogHandlerUtils {
   }
 
   public ListTablesResponse listViews(
-      ViewCatalog catalog, Namespace namespace, String pageToken, String pageSize) {
+      ViewCatalog catalog, Namespace namespace, String pageToken, Integer pageSize) {
     List<TableIdentifier> results = catalog.listViews(namespace);
 
-    Pair<List<TableIdentifier>, String> page =
-        paginate(results, pageToken, Integer.parseInt(pageSize));
+    Pair<List<TableIdentifier>, String> page = paginate(results, pageToken, pageSize);
 
     return ListTablesResponse.builder().addAll(page.first()).nextPageToken(page.second()).build();
   }

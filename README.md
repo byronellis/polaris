@@ -81,6 +81,25 @@ insert into db1.table1 values (1, 'a');
 select * from db1.table1;
 ```
 - `env POLARIS_HOST=localhost ./regtests/run.sh` - To run regression tests locally, see more options [here](./regtests/README.md).
+
+## Makefile Convenience Commands
+
+To streamline the developer experience, especially for common setup and build tasks, a root-level Makefile is available. This Makefile acts as a convenient wrapper around various Gradle commands and other tooling, simplifying interactions. While Gradle remains the primary build system, the Makefile provides concise shortcuts for frequent operations like:
+  - Building Polaris components: e.g., `make build-server, make build-admin`
+  - Managing development clusters: e.g., `make minikube-start-cluster, make minikube-cleanup`
+  - Automating Helm tasks: e.g., `make helm-doc-generate, make helm-unittest`
+  - Handling dependencies: e.g., `make install-dependencies-brew`
+
+To see available commands:
+```bash
+make help
+```
+
+For example, to build the Polaris server and its container image, you can simply run:
+```bash
+make build-server
+```
+
 ### More build and run options
 
 #### Running in Docker
@@ -99,16 +118,7 @@ using different configurations. Check the `./getting-started` directory for more
 
 #### Running in Kubernetes
 
-- `./run.sh` - To run Polaris as a mini-deployment locally. This will create a Kind cluster, 
-  then deploy one pod and one service. The service is available on ports `8181` and `8182`.
-- `kubectl port-forward svc/polaris-service -n polaris 8181:8181 8182:8182` - To create secure 
-  connections between a local machine and a pod within the cluster for both service and 
-  health/metrics endpoints:
-  - http://localhost:8182/q/metrics
-  - http://localhost:8182/q/health
-- `kubectl get pods -n polaris` - To check the status of the pods.
-- `kubectl get deployment -n polaris` - To check the status of the deployment.
-- `kubectl describe deployment polaris-deployment -n polaris` - To troubleshoot if things aren't working as expected.
+- See [README in `helm/polaris`](helm/polaris/README.md) for more information.
 
 #### Configuring Polaris
 

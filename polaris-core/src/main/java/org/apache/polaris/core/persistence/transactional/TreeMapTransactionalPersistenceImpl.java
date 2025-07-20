@@ -21,7 +21,9 @@ package org.apache.polaris.core.persistence.transactional;
 import com.google.common.base.Predicates;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -29,17 +31,21 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.entity.EntityNameLookupRecord;
+import org.apache.polaris.core.entity.LocationBasedEntity;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
 import org.apache.polaris.core.entity.PolarisChangeTrackingVersions;
 import org.apache.polaris.core.entity.PolarisEntitiesActiveKey;
+import org.apache.polaris.core.entity.PolarisEntity;
+import org.apache.polaris.core.entity.PolarisEntityConstants;
 import org.apache.polaris.core.entity.PolarisEntityCore;
 import org.apache.polaris.core.entity.PolarisEntityId;
+import org.apache.polaris.core.entity.PolarisEntitySubType;
 import org.apache.polaris.core.entity.PolarisEntityType;
 import org.apache.polaris.core.entity.PolarisGrantRecord;
 import org.apache.polaris.core.entity.PolarisPrincipalSecrets;
 import org.apache.polaris.core.persistence.BaseMetaStoreManager;
 import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
-import org.apache.polaris.core.persistence.pagination.HasPageSize;
+import org.apache.polaris.core.persistence.pagination.EntityIdToken;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
 import org.apache.polaris.core.policy.PolarisPolicyMappingRecord;
@@ -47,6 +53,7 @@ import org.apache.polaris.core.policy.PolicyEntity;
 import org.apache.polaris.core.storage.PolarisStorageConfigurationInfo;
 import org.apache.polaris.core.storage.PolarisStorageIntegration;
 import org.apache.polaris.core.storage.PolarisStorageIntegrationProvider;
+import org.apache.polaris.core.storage.StorageLocation;
 
 public class TreeMapTransactionalPersistenceImpl extends AbstractTransactionalPersistence {
 
@@ -361,13 +368,23 @@ public class TreeMapTransactionalPersistenceImpl extends AbstractTransactionalPe
             .map(
                 nameRecord ->
                     this.lookupEntityInCurrentTxn(
-                        callCtx, catalogId, nameRecord.getId(), entityType.getCode()))
-            .filter(entityFilter);
-    if (pageToken instanceof HasPageSize) {
-      data = data.limit(((HasPageSize) pageToken).getPageSize());
-    }
+                        callCtx, catalogId, nameRecord.getId(), entityType.getCode()));
 
-    return Page.fromItems(data.map(transformer).collect(Collectors.toList()));
+    Predicate<PolarisBaseEntity> tokenFilter =
+        pageToken
+            .valueAs(EntityIdToken.class)
+            .map(
+                entityIdToken -> {
+                  var nextId = entityIdToken.entityId();
+                  return (Predicate<PolarisBaseEntity>) e -> e.getId() > nextId;
+                })
+            .orElse(e -> true);
+
+    data = data.sorted(Comparator.comparingLong(PolarisEntityCore::getId)).filter(tokenFilter);
+
+    data = data.filter(entityFilter);
+
+    return Page.mapped(pageToken, data, transformer, EntityIdToken::fromEntity);
   }
 
   /** {@inheritDoc} */
@@ -662,5 +679,46 @@ public class TreeMapTransactionalPersistenceImpl extends AbstractTransactionalPe
     return this.store
         .getSlicePolicyMappingRecordsByPolicy()
         .readRange(this.store.buildPrefixKeyComposite(policyTypeCode, policyCatalogId, policyId));
+  }
+
+  private Optional<String> getEntityLocationWithoutScheme(PolarisBaseEntity entity) {
+    if (entity.getType() == PolarisEntityType.TABLE_LIKE) {
+      if (entity.getSubType() == PolarisEntitySubType.ICEBERG_TABLE
+          || entity.getSubType() == PolarisEntitySubType.ICEBERG_VIEW) {
+        return Optional.of(
+            StorageLocation.of(
+                    entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
+                .withoutScheme());
+      }
+    }
+    if (entity.getType() == PolarisEntityType.NAMESPACE) {
+      return Optional.of(
+          StorageLocation.of(
+                  entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
+              .withoutScheme());
+    }
+    return Optional.empty();
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public <T extends PolarisEntity & LocationBasedEntity>
+      Optional<Optional<String>> hasOverlappingSiblings(
+          @Nonnull PolarisCallContext callContext, T entity) {
+    // TODO we could optimize this full scan
+    StorageLocation entityLocationWithoutScheme =
+        StorageLocation.of(StorageLocation.of(entity.getBaseLocation()).withoutScheme());
+    List<PolarisBaseEntity> allEntities = this.store.getSliceEntities().readRange("");
+    for (PolarisBaseEntity siblingEntity : allEntities) {
+      Optional<StorageLocation> maybeSiblingLocationWithoutScheme =
+          getEntityLocationWithoutScheme(siblingEntity).map(StorageLocation::of);
+      if (maybeSiblingLocationWithoutScheme.isPresent()) {
+        if (maybeSiblingLocationWithoutScheme.get().isChildOf(entityLocationWithoutScheme)
+            || entityLocationWithoutScheme.isChildOf(maybeSiblingLocationWithoutScheme.get())) {
+          return Optional.of(Optional.of(maybeSiblingLocationWithoutScheme.toString()));
+        }
+      }
+    }
+    return Optional.of(Optional.empty());
   }
 }

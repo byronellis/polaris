@@ -24,7 +24,6 @@ import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.collect.ImmutableMap;
 import io.quarkus.test.junit.QuarkusMock;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import jakarta.annotation.Nonnull;
 import jakarta.enterprise.context.RequestScoped;
 import jakarta.enterprise.inject.Alternative;
@@ -73,7 +72,6 @@ import org.apache.polaris.core.persistence.PolarisEntityManager;
 import org.apache.polaris.core.persistence.PolarisMetaStoreManager;
 import org.apache.polaris.core.persistence.dao.entity.EntityResult;
 import org.apache.polaris.core.persistence.resolver.PolarisResolutionManifest;
-import org.apache.polaris.core.persistence.transactional.TransactionalPersistence;
 import org.apache.polaris.core.policy.PredefinedPolicyTypes;
 import org.apache.polaris.core.secrets.UserSecretsManager;
 import org.apache.polaris.core.secrets.UserSecretsManagerFactory;
@@ -89,6 +87,7 @@ import org.apache.polaris.service.config.ReservedProperties;
 import org.apache.polaris.service.context.catalog.CallContextCatalogFactory;
 import org.apache.polaris.service.context.catalog.PolarisCallContextCatalogFactory;
 import org.apache.polaris.service.events.PolarisEventListener;
+import org.apache.polaris.service.quarkus.catalog.Profiles;
 import org.apache.polaris.service.storage.PolarisStorageIntegrationProviderImpl;
 import org.apache.polaris.service.task.TaskExecutor;
 import org.apache.polaris.service.types.PolicyIdentifier;
@@ -98,11 +97,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInfo;
 import org.mockito.Mockito;
+import software.amazon.awssdk.services.sts.StsClient;
 
 /** Base class for shared test setup logic used by various Polaris authz-related tests. */
 public abstract class PolarisAuthzTestBase {
 
-  public static class Profile implements QuarkusTestProfile {
+  public static class Profile extends Profiles.DefaultProfile {
 
     @Override
     public Set<Class<?>> getEnabledAlternatives() {
@@ -111,23 +111,15 @@ public abstract class PolarisAuthzTestBase {
 
     @Override
     public Map<String, String> getConfigOverrides() {
-      return Map.of(
-          "polaris.features.\"ALLOW_SPECIFYING_FILE_IO_IMPL\"",
-          "true",
-          "polaris.features.\"ALLOW_INSECURE_STORAGE_TYPES\"",
-          "true",
-          "polaris.features.\"ALLOW_EXTERNAL_METADATA_FILE_LOCATION\"",
-          "true",
-          "polaris.features.\"SUPPORTED_CATALOG_STORAGE_TYPES\"",
-          "[\"FILE\",\"S3\"]",
-          "polaris.readiness.ignore-severe-issues",
-          "true",
-          "polaris.features.\"ENABLE_GENERIC_TABLES\"",
-          "true",
-          "polaris.features.\"ENFORCE_PRINCIPAL_CREDENTIAL_ROTATION_REQUIRED_CHECKING\"",
-          "true",
-          "polaris.features.\"DROP_WITH_PURGE_ENABLED\"",
-          "true");
+      return ImmutableMap.<String, String>builder()
+          .putAll(super.getConfigOverrides())
+          .put("polaris.features.\"ALLOW_EXTERNAL_METADATA_FILE_LOCATION\"", "true")
+          .put("polaris.features.\"ENABLE_GENERIC_TABLES\"", "true")
+          .put(
+              "polaris.features.\"ENFORCE_PRINCIPAL_CREDENTIAL_ROTATION_REQUIRED_CHECKING\"",
+              "true")
+          .put("polaris.features.\"DROP_WITH_PURGE_ENABLED\"", "true")
+          .build();
     }
   }
 
@@ -207,7 +199,6 @@ public abstract class PolarisAuthzTestBase {
   protected PolarisEntityManager entityManager;
   protected PolarisMetaStoreManager metaStoreManager;
   protected UserSecretsManager userSecretsManager;
-  protected TransactionalPersistence metaStoreSession;
   protected PolarisBaseEntity catalogEntity;
   protected PrincipalEntity principalEntity;
   protected CallContext callContext;
@@ -218,9 +209,10 @@ public abstract class PolarisAuthzTestBase {
 
   @BeforeAll
   public static void setUpMocks() {
+    StsClient stsClient = Mockito.mock(StsClient.class);
     PolarisStorageIntegrationProviderImpl mock =
         new PolarisStorageIntegrationProviderImpl(
-            Mockito::mock,
+            destination -> stsClient,
             Optional.empty(),
             () -> GoogleCredentials.create(new AccessToken("abc", new Date())));
     QuarkusMock.installMockForType(mock, PolarisStorageIntegrationProviderImpl.class);
@@ -233,7 +225,7 @@ public abstract class PolarisAuthzTestBase {
     metaStoreManager = managerFactory.getOrCreateMetaStoreManager(realmContext);
     userSecretsManager = userSecretsManagerFactory.getOrCreateUserSecretsManager(realmContext);
 
-    polarisAuthorizer = new PolarisAuthorizerImpl(configurationStore);
+    polarisAuthorizer = new PolarisAuthorizerImpl();
 
     polarisContext =
         new PolarisCallContext(
@@ -333,7 +325,8 @@ public abstract class PolarisAuthzTestBase {
     baseCatalog.buildTable(TABLE_NS1B_1, SCHEMA).create();
     baseCatalog.buildTable(TABLE_NS2_1, SCHEMA).create();
 
-    genericTableCatalog.createGenericTable(TABLE_NS1_1_GENERIC, "format", "doc", Map.of());
+    genericTableCatalog.createGenericTable(
+        TABLE_NS1_1_GENERIC, "format", "file:///tmp/test_table", "doc", Map.of());
 
     policyCatalog.createPolicy(
         POLICY_NS1_1,

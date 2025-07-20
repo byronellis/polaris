@@ -32,6 +32,7 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -41,9 +42,11 @@ import java.util.stream.Stream;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.context.RealmContext;
 import org.apache.polaris.core.entity.EntityNameLookupRecord;
+import org.apache.polaris.core.entity.LocationBasedEntity;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
 import org.apache.polaris.core.entity.PolarisChangeTrackingVersions;
 import org.apache.polaris.core.entity.PolarisEntitiesActiveKey;
+import org.apache.polaris.core.entity.PolarisEntity;
 import org.apache.polaris.core.entity.PolarisEntityCore;
 import org.apache.polaris.core.entity.PolarisEntityId;
 import org.apache.polaris.core.entity.PolarisEntityType;
@@ -53,7 +56,7 @@ import org.apache.polaris.core.exceptions.AlreadyExistsException;
 import org.apache.polaris.core.persistence.BaseMetaStoreManager;
 import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
 import org.apache.polaris.core.persistence.RetryOnConcurrencyException;
-import org.apache.polaris.core.persistence.pagination.HasPageSize;
+import org.apache.polaris.core.persistence.pagination.EntityIdToken;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
 import org.apache.polaris.core.persistence.transactional.AbstractTransactionalPersistence;
@@ -477,11 +480,7 @@ public class PolarisEclipseLinkMetaStoreSessionImpl extends AbstractTransactiona
             .map(ModelEntity::toEntity)
             .filter(entityFilter);
 
-    if (pageToken instanceof HasPageSize hasPageSize) {
-      data = data.limit(hasPageSize.getPageSize());
-    }
-
-    return Page.fromItems(data.map(transformer).collect(Collectors.toList()));
+    return Page.mapped(pageToken, data, transformer, EntityIdToken::fromEntity);
   }
 
   /** {@inheritDoc} */
@@ -777,5 +776,13 @@ public class PolarisEclipseLinkMetaStoreSessionImpl extends AbstractTransactiona
     if (session != null) {
       session.getTransaction().rollback();
     }
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public <T extends PolarisEntity & LocationBasedEntity>
+      Optional<Optional<String>> hasOverlappingSiblings(
+          @Nonnull PolarisCallContext callContext, T entity) {
+    return Optional.empty();
   }
 }

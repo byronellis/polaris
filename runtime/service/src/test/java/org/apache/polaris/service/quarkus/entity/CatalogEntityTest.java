@@ -18,7 +18,12 @@
  */
 package org.apache.polaris.service.quarkus.entity;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
+import java.util.stream.Stream;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.PolarisDefaultDiagServiceImpl;
 import org.apache.polaris.core.admin.model.AwsStorageConfigInfo;
@@ -37,9 +42,12 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 public class CatalogEntityTest {
+  private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private CallContext callContext;
 
@@ -56,8 +64,9 @@ public class CatalogEntityTest {
     CallContext.setCurrentContext(polarisCallContext);
   }
 
-  @Test
-  public void testInvalidAllowedLocationPrefix() {
+  @ParameterizedTest
+  @ValueSource(strings = {"s3", "s3a"})
+  public void testInvalidAllowedLocationPrefixS3(String scheme) {
     String storageLocation = "unsupportPrefix://mybucket/path";
     AwsStorageConfigInfo awsStorageConfigModel =
         AwsStorageConfigInfo.builder()
@@ -65,20 +74,25 @@ public class CatalogEntityTest {
             .setExternalId("externalId")
             .setUserArn("aws::a:user:arn")
             .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
-            .setAllowedLocations(List.of(storageLocation, "s3://externally-owned-bucket"))
+            .setAllowedLocations(List.of(storageLocation, scheme + "://externally-owned-bucket"))
             .build();
-    CatalogProperties prop = new CatalogProperties(storageLocation);
+    CatalogProperties props = new CatalogProperties(storageLocation);
     Catalog awsCatalog =
         PolarisCatalog.builder()
             .setType(Catalog.TypeEnum.INTERNAL)
             .setName("name")
-            .setProperties(prop)
+            .setProperties(props)
             .setStorageConfigInfo(awsStorageConfigModel)
             .build();
     Assertions.assertThatThrownBy(() -> CatalogEntity.fromCatalog(callContext, awsCatalog))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining(
             "Location prefix not allowed: 'unsupportPrefix://mybucket/path', expected prefixes");
+  }
+
+  @Test
+  public void testInvalidAllowedLocationPrefix() {
+    String storageLocation = "unsupportPrefix://mybucket/path";
 
     // Invalid azure prefix
     AzureStorageConfigInfo azureStorageConfigModel =
@@ -119,9 +133,10 @@ public class CatalogEntityTest {
             "Location prefix not allowed: 'unsupportPrefix://mybucket/path', expected prefixes");
   }
 
-  @Test
-  public void testExceedMaxAllowedLocations() {
-    String storageLocation = "s3://mybucket/path/";
+  @ParameterizedTest
+  @ValueSource(strings = {"s3", "s3a"})
+  public void testExceedMaxAllowedLocations(String scheme) {
+    String storageLocation = scheme + "://mybucket/path/";
     AwsStorageConfigInfo awsStorageConfigModel =
         AwsStorageConfigInfo.builder()
             .setRoleArn("arn:aws:iam::012345678901:role/jdoe")
@@ -149,19 +164,20 @@ public class CatalogEntityTest {
         .doesNotThrowAnyException();
   }
 
-  @Test
-  public void testValidAllowedLocationPrefix() {
-    String basedLocation = "s3://externally-owned-bucket";
+  @ParameterizedTest
+  @ValueSource(strings = {"s3", "s3a"})
+  public void testValidAllowedLocationPrefixS3(String scheme) {
+    String baseLocation = scheme + "://externally-owned-bucket";
     AwsStorageConfigInfo awsStorageConfigModel =
         AwsStorageConfigInfo.builder()
             .setRoleArn("arn:aws:iam::012345678901:role/jdoe")
             .setExternalId("externalId")
             .setUserArn("aws::a:user:arn")
             .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
-            .setAllowedLocations(List.of(basedLocation))
+            .setAllowedLocations(List.of(baseLocation))
             .build();
 
-    CatalogProperties prop = new CatalogProperties(basedLocation);
+    CatalogProperties prop = new CatalogProperties(baseLocation);
     Catalog awsCatalog =
         PolarisCatalog.builder()
             .setType(Catalog.TypeEnum.INTERNAL)
@@ -171,15 +187,29 @@ public class CatalogEntityTest {
             .build();
     Assertions.assertThatNoException()
         .isThrownBy(() -> CatalogEntity.fromCatalog(callContext, awsCatalog));
+  }
 
-    basedLocation = "abfs://container@storageaccount.blob.windows.net/path";
-    prop.put(CatalogEntity.DEFAULT_BASE_LOCATION_KEY, basedLocation);
+  @Test
+  public void testValidAllowedLocationPrefix() {
+    String basedLocation = "abfs://container@storageaccount.blob.windows.net/path";
     AzureStorageConfigInfo azureStorageConfigModel =
         AzureStorageConfigInfo.builder()
             .setAllowedLocations(List.of(basedLocation))
             .setStorageType(StorageConfigInfo.StorageTypeEnum.AZURE)
             .setTenantId("tenantId")
             .build();
+    CatalogProperties prop = new CatalogProperties(basedLocation);
+    Catalog awsCatalog =
+        PolarisCatalog.builder()
+            .setType(Catalog.TypeEnum.INTERNAL)
+            .setName("name")
+            .setProperties(prop)
+            .setStorageConfigInfo(azureStorageConfigModel)
+            .build();
+    Assertions.assertThatNoException()
+        .isThrownBy(() -> CatalogEntity.fromCatalog(callContext, awsCatalog));
+    prop.put(CatalogEntity.DEFAULT_BASE_LOCATION_KEY, basedLocation);
+
     Catalog azureCatalog =
         PolarisCatalog.builder()
             .setType(Catalog.TypeEnum.INTERNAL)
@@ -243,5 +273,127 @@ public class CatalogEntityTest {
     Assertions.assertThatThrownBy(() -> CatalogEntity.fromCatalog(callContext, awsCatalog))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(expectedMessage);
+  }
+
+  @Test
+  public void testCatalogTypeDefaultsToInternal() {
+    String baseLocation = "s3://test-bucket/path";
+    AwsStorageConfigInfo storageConfigModel =
+        AwsStorageConfigInfo.builder()
+            .setRoleArn("arn:aws:iam::012345678901:role/test-role")
+            .setExternalId("externalId")
+            .setUserArn("aws::a:user:arn")
+            .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
+            .setAllowedLocations(List.of(baseLocation))
+            .build();
+    CatalogEntity catalogEntity =
+        new CatalogEntity.Builder()
+            .setName("test-catalog")
+            .setDefaultBaseLocation(baseLocation)
+            .setStorageConfigurationInfo(callContext, storageConfigModel, baseLocation)
+            .build();
+
+    Catalog catalog = catalogEntity.asCatalog();
+    assertThat(catalog.getType()).isEqualTo(Catalog.TypeEnum.INTERNAL);
+  }
+
+  @Test
+  public void testCatalogTypeExternalPreserved() {
+    String baseLocation = "s3://test-bucket/path";
+    AwsStorageConfigInfo storageConfigModel =
+        AwsStorageConfigInfo.builder()
+            .setRoleArn("arn:aws:iam::012345678901:role/test-role")
+            .setExternalId("externalId")
+            .setUserArn("aws::a:user:arn")
+            .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
+            .setAllowedLocations(List.of(baseLocation))
+            .build();
+    CatalogEntity catalogEntity =
+        new CatalogEntity.Builder()
+            .setName("test-external-catalog")
+            .setDefaultBaseLocation(baseLocation)
+            .setCatalogType(Catalog.TypeEnum.EXTERNAL.name())
+            .setStorageConfigurationInfo(callContext, storageConfigModel, baseLocation)
+            .build();
+
+    Catalog catalog = catalogEntity.asCatalog();
+    assertThat(catalog.getType()).isEqualTo(Catalog.TypeEnum.EXTERNAL);
+  }
+
+  @Test
+  public void testCatalogTypeInternalExplicitlySet() {
+    String baseLocation = "s3://test-bucket/path";
+    AwsStorageConfigInfo storageConfigModel =
+        AwsStorageConfigInfo.builder()
+            .setRoleArn("arn:aws:iam::012345678901:role/test-role")
+            .setExternalId("externalId")
+            .setUserArn("aws::a:user:arn")
+            .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
+            .setAllowedLocations(List.of(baseLocation))
+            .build();
+    CatalogEntity catalogEntity =
+        new CatalogEntity.Builder()
+            .setName("test-internal-catalog")
+            .setDefaultBaseLocation(baseLocation)
+            .setCatalogType(Catalog.TypeEnum.INTERNAL.name())
+            .setStorageConfigurationInfo(callContext, storageConfigModel, baseLocation)
+            .build();
+
+    Catalog catalog = catalogEntity.asCatalog();
+    assertThat(catalog.getType()).isEqualTo(Catalog.TypeEnum.INTERNAL);
+  }
+
+  @Test
+  public void testAwsConfigJsonPropertiesPresence() throws JsonProcessingException {
+    AwsStorageConfigInfo.Builder b =
+        AwsStorageConfigInfo.builder()
+            .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
+            .setRoleArn("arn:aws:iam::012345678901:role/test-role");
+    assertThat(MAPPER.writeValueAsString(b.build())).contains("roleArn");
+    assertThat(MAPPER.writeValueAsString(b.build())).doesNotContain("endpoint");
+    assertThat(MAPPER.writeValueAsString(b.build())).doesNotContain("stsEndpoint");
+
+    b.setEndpoint("http://s3.example.com");
+    b.setStsEndpoint("http://sts.example.com");
+    b.setPathStyleAccess(false);
+    assertThat(MAPPER.writeValueAsString(b.build())).contains("roleArn");
+    assertThat(MAPPER.writeValueAsString(b.build())).contains("endpoint");
+    assertThat(MAPPER.writeValueAsString(b.build())).contains("stsEndpoint");
+    assertThat(MAPPER.writeValueAsString(b.build())).contains("pathStyleAccess");
+  }
+
+  @ParameterizedTest
+  @MethodSource
+  public void testAwsConfigRoundTrip(AwsStorageConfigInfo config) throws JsonProcessingException {
+    String configStr = MAPPER.writeValueAsString(config);
+    CatalogEntity catalogEntity =
+        new CatalogEntity.Builder()
+            .setName("testAwsConfigRoundTrip")
+            .setDefaultBaseLocation(config.getAllowedLocations().getFirst())
+            .setCatalogType(Catalog.TypeEnum.INTERNAL.name())
+            .setStorageConfigurationInfo(
+                callContext,
+                MAPPER.readValue(configStr, StorageConfigInfo.class),
+                config.getAllowedLocations().getFirst())
+            .build();
+
+    Catalog catalog = catalogEntity.asCatalog();
+    assertThat(catalog.getStorageConfigInfo()).isEqualTo(config);
+    assertThat(MAPPER.writeValueAsString(catalog.getStorageConfigInfo())).isEqualTo(configStr);
+  }
+
+  public static Stream<Arguments> testAwsConfigRoundTrip() {
+    AwsStorageConfigInfo.Builder b =
+        AwsStorageConfigInfo.builder()
+            .setStorageType(StorageConfigInfo.StorageTypeEnum.S3)
+            .setAllowedLocations(List.of("s3://example.com"))
+            .setRoleArn("arn:aws:iam::012345678901:role/test-role");
+    return Stream.of(
+        Arguments.of(b.build()),
+        Arguments.of(b.setExternalId("ex1").build()),
+        Arguments.of(b.setRegion("us-west-2").build()),
+        Arguments.of(b.setEndpoint("http://s3.example.com:1234").build()),
+        Arguments.of(b.setStsEndpoint("http://sts.example.com:1234").build()),
+        Arguments.of(b.setPathStyleAccess(true).build()));
   }
 }
