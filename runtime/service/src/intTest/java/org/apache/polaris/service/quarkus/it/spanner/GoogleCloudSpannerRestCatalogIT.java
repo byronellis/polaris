@@ -21,9 +21,9 @@ package org.apache.polaris.service.quarkus.it.spanner;
 
 import io.quarkus.test.junit.QuarkusIntegrationTest;
 import io.quarkus.test.junit.TestProfile;
-import org.apache.polaris.service.it.test.PolarisRestCatalogIntegrationTest;
+import org.apache.polaris.service.it.test.PolarisRestCatalogFileIntegrationTest;
 import org.apache.polaris.test.commons.GoogleCloudSpannerProfile;
 
 @TestProfile(GoogleCloudSpannerProfile.class)
 @QuarkusIntegrationTest
-public class GoogleCloudSpannerRestCatalogIT extends PolarisRestCatalogIntegrationTest {}
+public class GoogleCloudSpannerRestCatalogIT extends PolarisRestCatalogFileIntegrationTest {}
