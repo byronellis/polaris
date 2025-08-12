@@ -32,14 +32,11 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Value;
 import com.google.common.collect.ImmutableList;
+import java.util.Arrays;
 import java.util.List;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
 import org.apache.polaris.core.entity.PolarisEntityCore;
 import org.apache.polaris.core.entity.PolarisEntityId;
-import org.apache.polaris.core.entity.PolarisEntitySubType;
-import org.apache.polaris.core.entity.PolarisEntityType;
-import org.apache.polaris.core.persistence.pagination.HasPageOffset;
-import org.apache.polaris.core.persistence.pagination.HasPageSize;
 import org.apache.polaris.core.persistence.pagination.PageToken;
 import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 
@@ -56,23 +53,23 @@ public final class Entity {
 
   public static final List<Struct> TABLE_SCHEMA =
       ImmutableList.copyOf(
-          new Struct[] {
-            column("RealmId", STRING_TYPE, false, true),
-            column("CatalogId", INT64_TYPE, false, true),
-            column("Id", INT64_TYPE, false, true),
-            column("ParentId", INT64_TYPE, false, false),
-            column("Name", STRING_TYPE, false, false),
-            column(ENTITY_VERSION, INT64_TYPE, false, false),
-            column("TypeCode", INT64_TYPE, false, false),
-            column("SubTypeCode", INT64_TYPE, false, false),
-            column("CreateTimestamp", INT64_TYPE, false, false),
-            column("DropTimestamp", INT64_TYPE, false, false),
-            column("PurgeTimestamp", INT64_TYPE, false, false),
-            column("ToPurgeTimestamp", INT64_TYPE, false, false),
-            column("LastUpdateTimestamp", INT64_TYPE, false, false),
-            column("Properties", JSON_TYPE, false, false),
-            column("InternalProperties", JSON_TYPE, false, false),
-            column(GRANT_RECORDS_VERSION, INT64_TYPE, false, false),
+          new Struct[]{
+              column("RealmId", STRING_TYPE, false, true),
+              column("CatalogId", INT64_TYPE, false, true),
+              column("Id", INT64_TYPE, false, true),
+              column("ParentId", INT64_TYPE, false, false),
+              column("Name", STRING_TYPE, false, false),
+              column(ENTITY_VERSION, INT64_TYPE, false, false),
+              column("TypeCode", INT64_TYPE, false, false),
+              column("SubTypeCode", INT64_TYPE, false, false),
+              column("CreateTimestamp", INT64_TYPE, false, false),
+              column("DropTimestamp", INT64_TYPE, false, false),
+              column("PurgeTimestamp", INT64_TYPE, false, false),
+              column("ToPurgeTimestamp", INT64_TYPE, false, false),
+              column("LastUpdateTimestamp", INT64_TYPE, false, false),
+              column("Properties", JSON_TYPE, false, false),
+              column("InternalProperties", JSON_TYPE, false, false),
+              column(GRANT_RECORDS_VERSION, INT64_TYPE, false, false),
           });
 
   public static final List<String> TABLE_COLUMNS =
@@ -105,26 +102,24 @@ public final class Entity {
     }
     // Should this maybe use PolarisEntity? That has builders, but all of the persistence
     // stuff seems to deal with PolarisBaseEntity and PolarisEntity is built on that...
-    PolarisBaseEntity entity =
-        new PolarisBaseEntity(
-            result.getLong("CatalogId"),
-            result.getLong("Id"),
-            PolarisEntityType.fromCode((int) result.getLong("TypeCode")),
-            PolarisEntitySubType.fromCode((int) result.getLong("SubTypeCode")),
-            result.getLong("ParentId"),
-            result.isNull("Name") ? null : result.getString("Name"));
-    // No constructor for these so set them manually
-    entity.setEntityVersion((int) result.getLong("EntityVersion"));
-    entity.setCreateTimestamp(result.getLong("CreateTimestamp"));
-    entity.setDropTimestamp(result.getLong("DropTimestamp"));
-    entity.setPurgeTimestamp(result.getLong("PurgeTimestamp"));
-    entity.setToPurgeTimestamp(result.getLong("ToPurgeTimestamp"));
-    entity.setLastUpdateTimestamp(result.getLong("LastUpdateTimestamp"));
-
-    entity.setProperties(result.getJson("Properties"));
-    entity.setInternalProperties(result.getJson("InternalProperties"));
-    entity.setGrantRecordsVersion((int) result.getLong("GrantRecordsVersion"));
-    return entity;
+    return
+        new PolarisBaseEntity.Builder()
+            .catalogId(result.getLong("CatalogId"))
+            .id(result.getLong("Id"))
+            .typeCode((int)result.getLong("TypeCode"))
+            .subTypeCode((int)result.getLong("SubTypeCode"))
+            .parentId(result.getLong("ParentId"))
+            .name(result.isNull("Name") ? null : result.getString("Name"))
+            .entityVersion((int)result.getLong(ENTITY_VERSION))
+            .createTimestamp(result.getLong("CreateTimestamp"))
+            .dropTimestamp(result.getLong("DropTimestamp"))
+            .purgeTimestamp(result.getLong("PurgeTimestamp"))
+            .toPurgeTimestamp(result.getLong("ToPurgeTimestamp"))
+            .lastUpdateTimestamp(result.getLong("LastUpdateTimestamp"))
+            .properties(result.getJson("Properties"))
+            .internalProperties(result.getJson("InternalProperties"))
+            .grantRecordsVersion((int)result.getLong(GRANT_RECORDS_VERSION))
+            .build();
   }
 
   public static Mutation upsert(String tableName, String realmId, PolarisBaseEntity entity) {
@@ -139,7 +134,7 @@ public final class Entity {
         .to(entity.getParentId())
         .set("Name")
         .to(Value.string(entity.getName()))
-        .set("EntityVersion")
+        .set(ENTITY_VERSION)
         .to((long) entity.getEntityVersion())
         .set("TypeCode")
         .to((long) entity.getTypeCode())
@@ -159,7 +154,7 @@ public final class Entity {
         .to(SpannerUtil.jsonValue(entity.getPropertiesAsMap()))
         .set("InternalProperties")
         .to(SpannerUtil.jsonValue(entity.getInternalPropertiesAsMap()))
-        .set("GrantRecordsVersion")
+        .set(GRANT_RECORDS_VERSION)
         .to((long) entity.getGrantRecordsVersion())
         .build();
   }
@@ -177,16 +172,21 @@ public final class Entity {
   }
 
   public static Statement.Builder listEntities(PageToken pageToken) {
-    String LimitClause =
-        (pageToken != null && (pageToken instanceof HasPageSize))
-            ? String.format("LIMIT %d", ((HasPageSize) pageToken).getPageSize())
-            : "";
-    String OffsetClause =
-        (pageToken != null && (pageToken instanceof HasPageOffset))
-            ? String.format("OFFSET %d", ((HasPageOffset) pageToken).getPageOffset())
-            : "";
-    String OrderClause =
-        LimitClause.length() > 0 || OffsetClause.length() > 0 ? "ORDER BY RealmId,Id" : "";
+    List<String> whereClause = Arrays.asList(
+        "RealmId = @realmId",
+        "CatalogId = @catalogId",
+        "ParentId = @parentId",
+        "TypeCode = @typeCode");
+
+    // We don't apply a limit clause because we need to do client-side filtering but if
+    // pagination is requested we do apply a token ordering and optionally a filter
+    String OrderClause = "";
+    if (pageToken.paginationRequested()) {
+      OrderClause = "ORDER BY Id";
+      if(pageToken.value().isPresent()) {
+        whereClause.add("Id > @id");
+      }
+    }
     return Statement.newBuilder(
         String.join(
             " ",
@@ -195,13 +195,7 @@ public final class Entity {
             String.format("FROM `%s`", TABLE_NAME),
             "WHERE",
             String.join(
-                " AND ",
-                "RealmId = @realmId",
-                "CatalogId = @catalogId",
-                "ParentId = @parentId",
-                "TypeCode = @typeCode"),
-            OrderClause,
-            LimitClause,
-            OffsetClause));
+                " AND ",whereClause),
+            OrderClause));
   }
 }

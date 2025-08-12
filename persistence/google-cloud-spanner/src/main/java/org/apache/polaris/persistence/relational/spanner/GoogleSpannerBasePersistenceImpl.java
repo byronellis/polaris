@@ -35,13 +35,20 @@ import com.google.cloud.spanner.TransactionContext;
 import com.google.cloud.spanner.TransactionRunner;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.entity.EntityNameLookupRecord;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
@@ -57,11 +64,6 @@ import org.apache.polaris.core.persistence.EntityAlreadyExistsException;
 import org.apache.polaris.core.persistence.IntegrationPersistence;
 import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
 import org.apache.polaris.core.persistence.RetryOnConcurrencyException;
-import org.apache.polaris.core.persistence.pagination.DonePageToken;
-import org.apache.polaris.core.persistence.pagination.HasPageOffset;
-import org.apache.polaris.core.persistence.pagination.HasPageSize;
-import org.apache.polaris.core.persistence.pagination.LimitPageToken;
-import org.apache.polaris.core.persistence.pagination.OffsetLimitPageToken;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
 import org.apache.polaris.core.policy.PolarisPolicyMappingRecord;
@@ -427,55 +429,55 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       Predicate<PolarisBaseEntity> entityFilter,
       Function<PolarisBaseEntity, T> transformer,
       PageToken pageToken) {
+
     ArrayList<T> currentPage = new ArrayList<>();
 
-    long rawOffset =
-        (pageToken instanceof HasPageOffset) ? ((HasPageOffset) pageToken).getPageOffset() : 0;
-    int pageSize =
-        (pageToken instanceof HasPageSize)
-            ? ((HasPageSize) pageToken).getPageSize()
-            : Integer.MAX_VALUE;
-    boolean reading = true;
-    while (reading) {
-      int rawReads = 0;
-      try (ResultSet result =
-          client()
-              .singleUseReadOnlyTransaction()
-              .executeQuery(
-                  Entity.listEntities(pageToken)
-                      .bind("realmId")
-                      .to(callCtx.getRealmContext().getRealmIdentifier())
-                      .bind("catalogId")
-                      .to(catalogId)
-                      .bind("parentId")
-                      .to(parentId)
-                      .bind("typeCode")
-                      .to(entityType.getCode())
-                      .build())) {
-        while (result.next()) {
-          rawReads++;
-          PolarisBaseEntity entity = Entity.fromStruct(result.getCurrentRowAsStruct());
-          if (entityFilter.test(entity)) {
-            currentPage.add(transformer.apply(entity));
-          }
-        }
-        rawOffset += rawReads;
-        // If we read less than our page size or we have filled our current page we
-        // can stop reading. Otherwise we should keep reading until we fill the page
-        if (rawReads < pageSize || currentPage.size() == pageSize) {
-          reading = false;
-        }
+    Statement.Builder stmt = Entity.listEntities(pageToken)
+        .bind("realmId")
+        .to(callCtx.getRealmContext().getRealmIdentifier())
+        .bind("catalogId")
+        .to(catalogId)
+        .bind("parentId")
+        .to(parentId)
+        .bind("typeCode")
+        .to(entityType.getCode());
+    if (pageToken.paginationRequested()) {
+
+      // The token is the id of the last reported value in the previous page
+      if (pageToken.value().isPresent()) {
+        String token = pageToken.value().get().getT();
+        stmt = stmt.bind("id").to(Long.getLong(token));
       }
     }
-    // if we have returned fewer results than requested or the page size with a limit
-    // page token then we should be done. If we are an offset limit page token we should
-    // adjust to our new raw offset.
-    if (currentPage.size() < pageSize || pageToken instanceof LimitPageToken) {
-      pageToken = new DonePageToken();
-    } else if (pageToken instanceof OffsetLimitPageToken) {
-      pageToken = PageToken.fromLimitWithOffset(pageSize, rawOffset);
+
+    try (final ResultSet result =
+        client()
+            .singleUseReadOnlyTransaction()
+            .executeQuery(stmt.build())) {
+      final Integer requestedPageSize =
+          pageToken.pageSize().isPresent() ? pageToken.pageSize().getAsInt() : null;
+
+      // A little awkward here as ResultSet doesn't really conform to Java iterators or streams
+      final Iterator<PolarisBaseEntity> resultIterator = new Iterator<PolarisBaseEntity>() {
+        @Override
+        public boolean hasNext() {
+          return result.next();
+        }
+
+        @Override
+        public PolarisBaseEntity next() {
+          return Entity.fromStruct(result.getCurrentRowAsStruct());
+        }
+      };
+      Stream<PolarisBaseEntity> resultStream = StreamSupport.stream(
+          Spliterators.spliteratorUnknownSize(resultIterator, Spliterator.ORDERED), false);
+
+      return Page.mapped(pageToken, resultStream,
+          transformer, last -> {
+            return PageToken.build(Long.toString(last.getId()), requestedPageSize);
+          });
     }
-    return new Page<>(pageToken, currentPage);
+    return Page.fromItems(Collections.emptyList());
   }
 
   @Override
@@ -581,15 +583,15 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
           .next();
     } else {
       return client()
-              .singleUse()
-              .readRowUsingIndex(
-                  Entity.TABLE_NAME,
-                  Entity.CHILDREN_INDEX,
-                  Key.of(
-                      callContext.getRealmContext().getRealmIdentifier(),
-                      parentId,
-                      optionalEntityType.getCode()),
-                  ImmutableList.of("Id"))
+          .singleUse()
+          .readRowUsingIndex(
+              Entity.TABLE_NAME,
+              Entity.CHILDREN_INDEX,
+              Key.of(
+                  callContext.getRealmContext().getRealmIdentifier(),
+                  parentId,
+                  optionalEntityType.getCode()),
+              ImmutableList.of("Id"))
           != null;
     }
   }
@@ -624,12 +626,12 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
                 principalSecrets = secretsGenerator.produceSecrets(principalName, principalId);
                 exists =
                     txn.readRow(
-                            PrincipalAuthenticationData.TABLE_NAME,
-                            PrincipalAuthenticationData.toKey(
-                                callCtx.getRealmContext().getRealmIdentifier(),
-                                principalSecrets.getPrincipalClientId(),
-                                principalSecrets.getPrincipalId()),
-                            ImmutableList.of("PrincipalId"))
+                        PrincipalAuthenticationData.TABLE_NAME,
+                        PrincipalAuthenticationData.toKey(
+                            callCtx.getRealmContext().getRealmIdentifier(),
+                            principalSecrets.getPrincipalClientId(),
+                            principalSecrets.getPrincipalId()),
+                        ImmutableList.of("PrincipalId"))
                         != null;
               } while (exists);
               txn.buffer(
@@ -689,11 +691,11 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
   @Override
   public <T extends PolarisStorageConfigurationInfo>
-      PolarisStorageIntegration<T> createStorageIntegration(
-          PolarisCallContext callCtx,
-          long catalogId,
-          long entityId,
-          PolarisStorageConfigurationInfo polarisStorageConfigurationInfo) {
+  PolarisStorageIntegration<T> createStorageIntegration(
+      PolarisCallContext callCtx,
+      long catalogId,
+      long entityId,
+      PolarisStorageConfigurationInfo polarisStorageConfigurationInfo) {
     return storageIntegrationProvider.getStorageIntegrationForConfig(
         polarisStorageConfigurationInfo);
   }
@@ -702,12 +704,13 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   public <T extends PolarisStorageConfigurationInfo> void persistStorageIntegrationIfNeeded(
       PolarisCallContext callCtx,
       PolarisBaseEntity entity,
-      PolarisStorageIntegration<T> storageIntegration) {}
+      PolarisStorageIntegration<T> storageIntegration) {
+  }
 
   @Override
   public <T extends PolarisStorageConfigurationInfo>
-      PolarisStorageIntegration<T> loadPolarisStorageIntegration(
-          PolarisCallContext callContext, PolarisBaseEntity entity) {
+  PolarisStorageIntegration<T> loadPolarisStorageIntegration(
+      PolarisCallContext callContext, PolarisBaseEntity entity) {
     PolarisStorageConfigurationInfo storageConfig =
         BaseMetaStoreManager.extractStorageConfiguration(callContext, entity);
     return storageIntegrationProvider.getStorageIntegrationForConfig(storageConfig);
@@ -740,7 +743,8 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       PolarisCallContext callCtx,
       PolarisBaseEntity entity,
       List<PolarisPolicyMappingRecord> mappingOnTarget,
-      List<PolarisPolicyMappingRecord> mappingOnPolicy) {}
+      List<PolarisPolicyMappingRecord> mappingOnPolicy) {
+  }
 
   @Override
   public PolarisPolicyMappingRecord lookupPolicyMappingRecord(
@@ -776,17 +780,17 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   public List<PolarisPolicyMappingRecord> loadPoliciesOnTargetByType(
       PolarisCallContext callCtx, long targetCatalogId, long targetId, int policyTypeCode) {
     return asStream(
-            client()
-                .singleUseReadOnlyTransaction()
-                .read(
-                    PolicyMapping.TABLE_NAME,
-                    KeySet.range(
-                        PolicyMapping.toKeyRange(
-                            callCtx.getRealmContext().getRealmIdentifier(),
-                            targetCatalogId,
-                            targetId,
-                            policyTypeCode)),
-                    PolicyMapping.TABLE_COLUMNS))
+        client()
+            .singleUseReadOnlyTransaction()
+            .read(
+                PolicyMapping.TABLE_NAME,
+                KeySet.range(
+                    PolicyMapping.toKeyRange(
+                        callCtx.getRealmContext().getRealmIdentifier(),
+                        targetCatalogId,
+                        targetId,
+                        policyTypeCode)),
+                PolicyMapping.TABLE_COLUMNS))
         .map(PolicyMapping::fromStruct)
         .toList();
   }
@@ -795,16 +799,16 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   public List<PolarisPolicyMappingRecord> loadAllPoliciesOnTarget(
       PolarisCallContext callCtx, long targetCatalogId, long targetId) {
     return asStream(
-            client()
-                .singleUseReadOnlyTransaction()
-                .read(
-                    PolicyMapping.TABLE_NAME,
-                    KeySet.range(
-                        PolicyMapping.toKeyRange(
-                            callCtx.getRealmContext().getRealmIdentifier(),
-                            targetCatalogId,
-                            targetId)),
-                    PolicyMapping.TABLE_COLUMNS))
+        client()
+            .singleUseReadOnlyTransaction()
+            .read(
+                PolicyMapping.TABLE_NAME,
+                KeySet.range(
+                    PolicyMapping.toKeyRange(
+                        callCtx.getRealmContext().getRealmIdentifier(),
+                        targetCatalogId,
+                        targetId)),
+                PolicyMapping.TABLE_COLUMNS))
         .map(PolicyMapping::fromStruct)
         .toList();
   }
@@ -813,18 +817,18 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   public List<PolarisPolicyMappingRecord> loadAllTargetsOnPolicy(
       PolarisCallContext callCtx, long policyCatalogId, long policyId, int policyTypeCode) {
     return asStream(
-            client()
-                .singleUseReadOnlyTransaction()
-                .readUsingIndex(
-                    PolicyMapping.TABLE_NAME,
-                    PolicyMapping.POLICY_INDEX,
-                    KeySet.singleKey(
-                        Key.of(
-                            callCtx.getRealmContext().getRealmIdentifier(),
-                            policyTypeCode,
-                            policyCatalogId,
-                            policyId)),
-                    PolicyMapping.TABLE_COLUMNS))
+        client()
+            .singleUseReadOnlyTransaction()
+            .readUsingIndex(
+                PolicyMapping.TABLE_NAME,
+                PolicyMapping.POLICY_INDEX,
+                KeySet.singleKey(
+                    Key.of(
+                        callCtx.getRealmContext().getRealmIdentifier(),
+                        policyTypeCode,
+                        policyCatalogId,
+                        policyId)),
+                PolicyMapping.TABLE_COLUMNS))
         .map(PolicyMapping::fromStruct)
         .toList();
   }
