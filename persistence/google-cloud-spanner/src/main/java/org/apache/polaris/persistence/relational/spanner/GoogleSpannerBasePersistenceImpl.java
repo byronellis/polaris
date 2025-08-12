@@ -34,6 +34,7 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TransactionContext;
 import com.google.cloud.spanner.TransactionRunner;
 import com.google.common.collect.ImmutableList;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -47,6 +48,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.entity.EntityNameLookupRecord;
 import org.apache.polaris.core.entity.PolarisBaseEntity;
@@ -62,6 +64,7 @@ import org.apache.polaris.core.persistence.EntityAlreadyExistsException;
 import org.apache.polaris.core.persistence.IntegrationPersistence;
 import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
 import org.apache.polaris.core.persistence.RetryOnConcurrencyException;
+import org.apache.polaris.core.persistence.pagination.EntityIdToken;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
 import org.apache.polaris.core.policy.PolarisPolicyMappingRecord;
@@ -449,33 +452,11 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
     try (final ResultSet result =
         client().singleUseReadOnlyTransaction().executeQuery(stmt.build())) {
-      final Integer requestedPageSize =
-          pageToken.pageSize().isPresent() ? pageToken.pageSize().getAsInt() : null;
-
-      // A little awkward here as ResultSet doesn't really conform to Java iterators or streams
-      final Iterator<PolarisBaseEntity> resultIterator =
-          new Iterator<PolarisBaseEntity>() {
-            @Override
-            public boolean hasNext() {
-              return result.next();
-            }
-
-            @Override
-            public PolarisBaseEntity next() {
-              return Entity.fromStruct(result.getCurrentRowAsStruct());
-            }
-          };
-      Stream<PolarisBaseEntity> resultStream =
-          StreamSupport.stream(
-              Spliterators.spliteratorUnknownSize(resultIterator, Spliterator.ORDERED), false);
-
       return Page.mapped(
           pageToken,
-          resultStream,
+          SpannerUtil.asStream(result).map(Entity::fromStruct).filter(entityFilter),
           transformer,
-          last -> {
-            return () -> Long.toString(last.getId());
-          });
+          EntityIdToken::fromEntity);
     }
   }
 
@@ -714,9 +695,6 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
     return storageIntegrationProvider.getStorageIntegrationForConfig(storageConfig);
   }
 
-  protected void bootstrapRealm(String realmId) {
-    client().write(ImmutableList.of(Realm.upsert(realmId)));
-  }
 
   @Override
   public void writeToPolicyMappingRecords(

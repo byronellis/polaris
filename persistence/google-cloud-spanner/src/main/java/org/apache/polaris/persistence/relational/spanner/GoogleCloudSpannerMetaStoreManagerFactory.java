@@ -20,15 +20,18 @@
 package org.apache.polaris.persistence.relational.spanner;
 
 import com.google.cloud.spanner.DatabaseClient;
+
 import io.smallrye.common.annotation.Identifier;
 import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+
 import org.apache.polaris.core.PolarisCallContext;
 import org.apache.polaris.core.PolarisDiagnostics;
 import org.apache.polaris.core.config.PolarisConfigurationStore;
@@ -51,6 +54,7 @@ import org.apache.polaris.core.persistence.cache.InMemoryEntityCache;
 import org.apache.polaris.core.persistence.dao.entity.BaseResult;
 import org.apache.polaris.core.persistence.dao.entity.PrincipalSecretsResult;
 import org.apache.polaris.core.storage.PolarisStorageIntegrationProvider;
+import org.apache.polaris.persistence.relational.spanner.model.Realm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,35 +80,8 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
   protected GoogleCloudSpannerMetaStoreManagerFactory() {}
 
   @Inject protected Consumer<SchemaOptions> schemaInitializer;
+  @Inject protected Consumer<RealmContext> realmInitializer;
   @Inject protected Supplier<DatabaseClient> clientSupplier;
-
-  /*
-  private RealmState getOrCreateRealmState(RealmContext realmContext, boolean isBootstrap) {
-    return realmStateMap.computeIfAbsent(
-        realmContext.getRealmIdentifier(),
-        (realmId) -> {
-          PolarisMetaStoreManager metaStoreManager = new AtomicOperationMetaStoreManager();
-          // For the moment each realm gets its own Spanner connection... we could prob
-          RealmState state =
-              new RealmState(
-                  metaStoreManager,
-                  () -> {
-                    return new GoogleSpannerBasePersistenceImpl(
-                        clientSupplier,
-                        secretGenerators.get(realmId),
-                        polarisStorageIntegrationProvider);
-                  });
-          if (!isBootstrap) {
-            checkBootstrapped(realmContext, state);
-          }
-          return state;
-        });
-  }
-
-  private RealmState getOrCreateRealmState(RealmContext realmContext) {
-    return getOrCreateRealmState(realmContext, false);
-  }
-   */
 
   protected PrincipalSecretsGenerator secretsGenerator(
       String realmId, @Nullable RootCredentialsSet rootCredentialsSet) {
@@ -180,6 +157,8 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
         schemaInitializer.accept(bootstrapOptions.schemaOptions());
         schemaInitialized = true;
       }
+      // Spanner actually has a realm parent table that needs to be initialized.
+      realmInitializer.accept(() -> realmId);
       initializeRealmState(realmId, rootCredentialsSet);
       results.put(realmId, bootstrapServiceAndCreatePolarisPrincipalForRealm(() -> realmId));
     }

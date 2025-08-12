@@ -19,16 +19,6 @@
 
 package org.apache.polaris.persistence.relational.spanner;
 
-import com.google.cloud.spanner.Database;
-import com.google.cloud.spanner.DatabaseAdminClient;
-import com.google.cloud.spanner.DatabaseClient;
-import com.google.cloud.spanner.DatabaseId;
-import com.google.cloud.spanner.Dialect;
-import com.google.cloud.spanner.Spanner;
-import jakarta.annotation.PostConstruct;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Produces;
-import jakarta.inject.Inject;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,10 +28,27 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+
+import org.apache.polaris.core.context.RealmContext;
 import org.apache.polaris.core.persistence.bootstrap.SchemaOptions;
+import org.apache.polaris.persistence.relational.spanner.model.Realm;
 import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.cloud.spanner.Database;
+import com.google.cloud.spanner.DatabaseAdminClient;
+import com.google.cloud.spanner.DatabaseClient;
+import com.google.cloud.spanner.DatabaseId;
+import com.google.cloud.spanner.Dialect;
+import com.google.cloud.spanner.Spanner;
+import com.google.cloud.spanner.SpannerException;
+import com.google.common.collect.ImmutableList;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Inject;
 
 @ApplicationScoped
 public class GoogleCloudSpannerDatabaseClientLifecycleManager {
@@ -110,6 +117,17 @@ public class GoogleCloudSpannerDatabaseClientLifecycleManager {
         throw new RuntimeException(
             "Unable to update Spanner DDL. Please disable this option for this database configuration.",
             e);
+      }
+    };
+  }
+
+  @Produces 
+  public Consumer<RealmContext> getRealmInitializer() {
+    return (realmContext) -> {
+      try {
+        spanner.getDatabaseClient(databaseId).write(ImmutableList.of(Realm.upsert(realmContext.getRealmIdentifier())));
+      } catch (SpannerException e) {
+        LOGGER.error("Unable to initialize realm "+realmContext.getRealmIdentifier(), e);
       }
     };
   }
