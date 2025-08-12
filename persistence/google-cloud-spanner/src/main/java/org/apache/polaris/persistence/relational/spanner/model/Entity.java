@@ -19,6 +19,17 @@
 
 package org.apache.polaris.persistence.relational.spanner.model;
 
+import java.util.Arrays;
+import java.util.List;
+
+import org.apache.polaris.core.entity.PolarisBaseEntity;
+import org.apache.polaris.core.entity.PolarisEntityConstants;
+import org.apache.polaris.core.entity.PolarisEntityCore;
+import org.apache.polaris.core.entity.PolarisEntityId;
+import org.apache.polaris.core.entity.PolarisEntitySubType;
+import org.apache.polaris.core.persistence.pagination.PageToken;
+import org.apache.polaris.core.storage.StorageLocation;
+import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.INT64_TYPE;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.JSON_TYPE;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.STRING_TYPE;
@@ -32,13 +43,6 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Value;
 import com.google.common.collect.ImmutableList;
-import java.util.Arrays;
-import java.util.List;
-import org.apache.polaris.core.entity.PolarisBaseEntity;
-import org.apache.polaris.core.entity.PolarisEntityCore;
-import org.apache.polaris.core.entity.PolarisEntityId;
-import org.apache.polaris.core.persistence.pagination.PageToken;
-import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 
 public final class Entity {
 
@@ -48,7 +52,10 @@ public final class Entity {
 
   public static final String CHILDREN_INDEX = "EntityChildrenIndex";
 
+  public static final String LOCATIONS_INDEX = "EntityLocationsIndex";
+
   public static final String ENTITY_VERSION = "EntityVersion";
+  
   public static final String GRANT_RECORDS_VERSION = "GrantRecordsVersion";
 
   public static final List<Struct> TABLE_SCHEMA =
@@ -70,6 +77,7 @@ public final class Entity {
               column("Properties", JSON_TYPE, false, false),
               column("InternalProperties", JSON_TYPE, false, false),
               column(GRANT_RECORDS_VERSION, INT64_TYPE, false, false),
+              column("LocationWithoutScheme", STRING_TYPE, true, false)
           });
 
   public static final List<String> TABLE_COLUMNS =
@@ -123,6 +131,30 @@ public final class Entity {
   }
 
   public static Mutation upsert(String tableName, String realmId, PolarisBaseEntity entity) {
+    
+    //Like the JDBC version pull the location out to allow for indexing.
+    String locationWithoutScheme = switch(entity.getType()) {
+      case TABLE_LIKE -> {
+        String location = null;
+        if(entity.getSubType() == PolarisEntitySubType.ICEBERG_TABLE || entity.getSubType() == PolarisEntitySubType.ICEBERG_VIEW) {
+          // For Iceberg tables and views, we store the location without the scheme
+          location = StorageLocation.of(
+                    entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
+                .withoutScheme();
+          }
+        yield location;
+      }
+      case NAMESPACE -> {
+        // Add logic for NAMESPACE if needed
+        yield StorageLocation.of(
+                    entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
+                .withoutScheme();
+      }
+      default -> null;
+    };
+
+
+
     return Mutation.newInsertOrUpdateBuilder(tableName)
         .set("RealmId")
         .to(realmId)
@@ -156,6 +188,8 @@ public final class Entity {
         .to(SpannerUtil.jsonValue(entity.getInternalPropertiesAsMap()))
         .set(GRANT_RECORDS_VERSION)
         .to((long) entity.getGrantRecordsVersion())
+        .set("LocationWithoutScheme")
+        .to(locationWithoutScheme)
         .build();
   }
 

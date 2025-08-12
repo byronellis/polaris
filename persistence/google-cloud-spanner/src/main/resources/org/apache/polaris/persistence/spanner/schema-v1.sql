@@ -39,13 +39,15 @@ ToPurgeTimestamp INT64,
 LastUpdateTimestamp INT64,
 `Properties` JSON,
 InternalProperties JSON,
-GrantRecordsVersion INT64)
+GrantRecordsVersion INT64,
+LocationWithoutScheme STRING(MAX))
 PRIMARY KEY (RealmId,Id),
 INTERLEAVE IN PARENT Realms ON DELETE CASCADE;
 
 CREATE UNIQUE NULL_FILTERED INDEX IF NOT EXISTS EntityNameIndex ON Entities(RealmId,CatalogId,ParentId,TypeCode,Name);
 
 CREATE INDEX IF NOT EXISTS EntityChildrenIndex ON Entities(RealmId,ParentId, TypeCode);
+CREATE INDEX IF NOT EXISTS EntityLocationsIndex ON Entities (RealmId, ParentId, LocationWithoutScheme) WHERE LocationWithoutScheme IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS GrantRecords(
   RealmId STRING(MAX) NOT NULL,
