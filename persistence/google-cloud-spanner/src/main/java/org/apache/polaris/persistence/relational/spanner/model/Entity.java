@@ -19,17 +19,6 @@
 
 package org.apache.polaris.persistence.relational.spanner.model;
 
-import java.util.Arrays;
-import java.util.List;
-
-import org.apache.polaris.core.entity.PolarisBaseEntity;
-import org.apache.polaris.core.entity.PolarisEntityConstants;
-import org.apache.polaris.core.entity.PolarisEntityCore;
-import org.apache.polaris.core.entity.PolarisEntityId;
-import org.apache.polaris.core.entity.PolarisEntitySubType;
-import org.apache.polaris.core.persistence.pagination.PageToken;
-import org.apache.polaris.core.storage.StorageLocation;
-import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.INT64_TYPE;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.JSON_TYPE;
 import static org.apache.polaris.persistence.relational.spanner.util.SpannerUtil.STRING_TYPE;
@@ -43,6 +32,16 @@ import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.StructReader;
 import com.google.cloud.spanner.Value;
 import com.google.common.collect.ImmutableList;
+import java.util.Arrays;
+import java.util.List;
+import org.apache.polaris.core.entity.PolarisBaseEntity;
+import org.apache.polaris.core.entity.PolarisEntityConstants;
+import org.apache.polaris.core.entity.PolarisEntityCore;
+import org.apache.polaris.core.entity.PolarisEntityId;
+import org.apache.polaris.core.entity.PolarisEntitySubType;
+import org.apache.polaris.core.persistence.pagination.PageToken;
+import org.apache.polaris.core.storage.StorageLocation;
+import org.apache.polaris.persistence.relational.spanner.util.SpannerUtil;
 
 public final class Entity {
 
@@ -55,29 +54,29 @@ public final class Entity {
   public static final String LOCATIONS_INDEX = "EntityLocationsIndex";
 
   public static final String ENTITY_VERSION = "EntityVersion";
-  
+
   public static final String GRANT_RECORDS_VERSION = "GrantRecordsVersion";
 
   public static final List<Struct> TABLE_SCHEMA =
       ImmutableList.copyOf(
-          new Struct[]{
-              column("RealmId", STRING_TYPE, false, true),
-              column("CatalogId", INT64_TYPE, false, true),
-              column("Id", INT64_TYPE, false, true),
-              column("ParentId", INT64_TYPE, false, false),
-              column("Name", STRING_TYPE, false, false),
-              column(ENTITY_VERSION, INT64_TYPE, false, false),
-              column("TypeCode", INT64_TYPE, false, false),
-              column("SubTypeCode", INT64_TYPE, false, false),
-              column("CreateTimestamp", INT64_TYPE, false, false),
-              column("DropTimestamp", INT64_TYPE, false, false),
-              column("PurgeTimestamp", INT64_TYPE, false, false),
-              column("ToPurgeTimestamp", INT64_TYPE, false, false),
-              column("LastUpdateTimestamp", INT64_TYPE, false, false),
-              column("Properties", JSON_TYPE, false, false),
-              column("InternalProperties", JSON_TYPE, false, false),
-              column(GRANT_RECORDS_VERSION, INT64_TYPE, false, false),
-              column("LocationWithoutScheme", STRING_TYPE, true, false)
+          new Struct[] {
+            column("RealmId", STRING_TYPE, false, true),
+            column("CatalogId", INT64_TYPE, false, true),
+            column("Id", INT64_TYPE, false, true),
+            column("ParentId", INT64_TYPE, false, false),
+            column("Name", STRING_TYPE, false, false),
+            column(ENTITY_VERSION, INT64_TYPE, false, false),
+            column("TypeCode", INT64_TYPE, false, false),
+            column("SubTypeCode", INT64_TYPE, false, false),
+            column("CreateTimestamp", INT64_TYPE, false, false),
+            column("DropTimestamp", INT64_TYPE, false, false),
+            column("PurgeTimestamp", INT64_TYPE, false, false),
+            column("ToPurgeTimestamp", INT64_TYPE, false, false),
+            column("LastUpdateTimestamp", INT64_TYPE, false, false),
+            column("Properties", JSON_TYPE, false, false),
+            column("InternalProperties", JSON_TYPE, false, false),
+            column(GRANT_RECORDS_VERSION, INT64_TYPE, false, false),
+            column("LocationWithoutScheme", STRING_TYPE, true, false)
           });
 
   public static final List<String> TABLE_COLUMNS =
@@ -110,50 +109,52 @@ public final class Entity {
     }
     // Should this maybe use PolarisEntity? That has builders, but all of the persistence
     // stuff seems to deal with PolarisBaseEntity and PolarisEntity is built on that...
-    return
-        new PolarisBaseEntity.Builder()
-            .catalogId(result.getLong("CatalogId"))
-            .id(result.getLong("Id"))
-            .typeCode((int)result.getLong("TypeCode"))
-            .subTypeCode((int)result.getLong("SubTypeCode"))
-            .parentId(result.getLong("ParentId"))
-            .name(result.isNull("Name") ? null : result.getString("Name"))
-            .entityVersion((int)result.getLong(ENTITY_VERSION))
-            .createTimestamp(result.getLong("CreateTimestamp"))
-            .dropTimestamp(result.getLong("DropTimestamp"))
-            .purgeTimestamp(result.getLong("PurgeTimestamp"))
-            .toPurgeTimestamp(result.getLong("ToPurgeTimestamp"))
-            .lastUpdateTimestamp(result.getLong("LastUpdateTimestamp"))
-            .properties(result.getJson("Properties"))
-            .internalProperties(result.getJson("InternalProperties"))
-            .grantRecordsVersion((int)result.getLong(GRANT_RECORDS_VERSION))
-            .build();
+    return new PolarisBaseEntity.Builder()
+        .catalogId(result.getLong("CatalogId"))
+        .id(result.getLong("Id"))
+        .typeCode((int) result.getLong("TypeCode"))
+        .subTypeCode((int) result.getLong("SubTypeCode"))
+        .parentId(result.getLong("ParentId"))
+        .name(result.isNull("Name") ? null : result.getString("Name"))
+        .entityVersion((int) result.getLong(ENTITY_VERSION))
+        .createTimestamp(result.getLong("CreateTimestamp"))
+        .dropTimestamp(result.getLong("DropTimestamp"))
+        .purgeTimestamp(result.getLong("PurgeTimestamp"))
+        .toPurgeTimestamp(result.getLong("ToPurgeTimestamp"))
+        .lastUpdateTimestamp(result.getLong("LastUpdateTimestamp"))
+        .properties(result.getJson("Properties"))
+        .internalProperties(result.getJson("InternalProperties"))
+        .grantRecordsVersion((int) result.getLong(GRANT_RECORDS_VERSION))
+        .build();
   }
 
   public static Mutation upsert(String tableName, String realmId, PolarisBaseEntity entity) {
-    
-    //Like the JDBC version pull the location out to allow for indexing.
-    String locationWithoutScheme = switch(entity.getType()) {
-      case TABLE_LIKE -> {
-        String location = null;
-        if(entity.getSubType() == PolarisEntitySubType.ICEBERG_TABLE || entity.getSubType() == PolarisEntitySubType.ICEBERG_VIEW) {
-          // For Iceberg tables and views, we store the location without the scheme
-          location = StorageLocation.of(
+
+    // Like the JDBC version pull the location out to allow for indexing.
+    String locationWithoutScheme =
+        switch (entity.getType()) {
+          case TABLE_LIKE -> {
+            String location = null;
+            if (entity.getSubType() == PolarisEntitySubType.ICEBERG_TABLE
+                || entity.getSubType() == PolarisEntitySubType.ICEBERG_VIEW) {
+              // For Iceberg tables and views, we store the location without the scheme
+              location =
+                  StorageLocation.of(
+                          entity
+                              .getPropertiesAsMap()
+                              .get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
+                      .withoutScheme();
+            }
+            yield location;
+          }
+          case NAMESPACE -> {
+            // Add logic for NAMESPACE if needed
+            yield StorageLocation.of(
                     entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
                 .withoutScheme();
           }
-        yield location;
-      }
-      case NAMESPACE -> {
-        // Add logic for NAMESPACE if needed
-        yield StorageLocation.of(
-                    entity.getPropertiesAsMap().get(PolarisEntityConstants.ENTITY_BASE_LOCATION))
-                .withoutScheme();
-      }
-      default -> null;
-    };
-
-
+          default -> null;
+        };
 
     return Mutation.newInsertOrUpdateBuilder(tableName)
         .set("RealmId")
@@ -206,18 +207,19 @@ public final class Entity {
   }
 
   public static Statement.Builder listEntities(PageToken pageToken) {
-    List<String> whereClause = Arrays.asList(
-        "RealmId = @realmId",
-        "CatalogId = @catalogId",
-        "ParentId = @parentId",
-        "TypeCode = @typeCode");
+    List<String> whereClause =
+        Arrays.asList(
+            "RealmId = @realmId",
+            "CatalogId = @catalogId",
+            "ParentId = @parentId",
+            "TypeCode = @typeCode");
 
     // We don't apply a limit clause because we need to do client-side filtering but if
     // pagination is requested we do apply a token ordering and optionally a filter
     String OrderClause = "";
     if (pageToken.paginationRequested()) {
       OrderClause = "ORDER BY Id";
-      if(pageToken.value().isPresent()) {
+      if (pageToken.value().isPresent()) {
         whereClause.add("Id > @id");
       }
     }
@@ -228,8 +230,7 @@ public final class Entity {
             String.join(",", TABLE_COLUMNS),
             String.format("FROM `%s`", TABLE_NAME),
             "WHERE",
-            String.join(
-                " AND ",whereClause),
+            String.join(" AND ", whereClause),
             OrderClause));
   }
 }

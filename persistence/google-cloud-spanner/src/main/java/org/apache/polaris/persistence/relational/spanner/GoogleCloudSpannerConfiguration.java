@@ -30,5 +30,4 @@ public interface GoogleCloudSpannerConfiguration {
   public Optional<String> databaseId();
 
   public Optional<String> emulatorHost();
-
 }

@@ -26,5 +26,4 @@ import org.apache.polaris.test.commons.GoogleCloudSpannerProfile;
 
 @TestProfile(GoogleCloudSpannerProfile.class)
 @QuarkusIntegrationTest
-public class GoogleCloudSpannerViewFileIT
-    extends PolarisRestCatalogViewFileIntegrationTestBase {}
+public class GoogleCloudSpannerViewFileIT extends PolarisRestCatalogViewFileIntegrationTestBase {}

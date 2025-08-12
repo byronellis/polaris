@@ -62,20 +62,21 @@ public class GoogleCloudSpannerDatabaseClientLifecycleManager {
 
   protected List<String> getSpannerDatabaseDdl(SchemaOptions options) {
     final InputStream schemaStream;
-    if(options.schemaFile() != null) {
+    if (options.schemaFile() != null) {
       try {
         schemaStream = new FileInputStream(options.schemaFile());
-      } catch(IOException e) {
-        throw new IllegalArgumentException("Unable to load file "+options.schemaFile(),e);
+      } catch (IOException e) {
+        throw new IllegalArgumentException("Unable to load file " + options.schemaFile(), e);
       }
     } else {
-      if(options.schemaVersion() == null || options.schemaVersion() == 1) {
-        schemaStream = getClass().getResourceAsStream("/org/apache/polaris/persistence/spanner/schema-v1.sql");
+      if (options.schemaVersion() == null || options.schemaVersion() == 1) {
+        schemaStream =
+            getClass().getResourceAsStream("/org/apache/polaris/persistence/spanner/schema-v1.sql");
       } else {
-      throw new IllegalArgumentException("Unknown schema version "+options.schemaVersion());
+        throw new IllegalArgumentException("Unknown schema version " + options.schemaVersion());
       }
     }
-    try(schemaStream) {
+    try (schemaStream) {
       String schema = new String(schemaStream.readAllBytes(), Charset.forName("UTF-8"));
       List<String> lines = new ArrayList<>();
       for (String s : schema.split("\n")) {
