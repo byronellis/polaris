@@ -64,6 +64,7 @@ import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.ForbiddenException;
 import org.apache.iceberg.exceptions.RESTException;
 import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.ResolvingFileIO;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.rest.RESTUtil;
@@ -168,7 +169,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
   };
 
   @Retention(RetentionPolicy.RUNTIME)
-  private @interface CatalogConfig {
+  public @interface CatalogConfig {
     Catalog.TypeEnum value() default Catalog.TypeEnum.INTERNAL;
 
     String[] properties() default {
@@ -190,11 +191,12 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
   protected abstract StorageConfigInfo getStorageConfigInfo();
 
   /**
-   * Determine whether the test should be skipped based on the environment or configuration.
-   *
-   * @return true if the test should be skipped, false otherwise
+   * A hook for test sub-classes to initialize {@link FileIO} objects used by test cases thenselves
+   * for accessing test storage.
    */
-  protected abstract boolean shouldSkip();
+  protected void initializeClientFileIO(FileIO fileIO) {
+    fileIO.initialize(Map.of());
+  }
 
   @BeforeAll
   static void setup(PolarisApiEndpoints apiEndpoints, ClientCredentials credentials) {
@@ -215,7 +217,6 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
 
   @BeforeEach
   public void before(TestInfo testInfo) {
-    Assumptions.assumeThat(shouldSkip()).isFalse();
     String principalName = client.newEntityName("snowman-rest");
     String principalRoleName = client.newEntityName("rest-admin");
     principalCredentials = managementApi.createPrincipalWithRole(principalName, principalRoleName);
@@ -614,7 +615,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
@@ -649,7 +650,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
@@ -683,7 +684,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
@@ -711,7 +712,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
@@ -755,7 +756,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
@@ -798,7 +799,7 @@ public abstract class PolarisRestCatalogIntegrationBase extends CatalogTests<RES
             externalCatalogBase + "/ns1/my_table",
             Map.of());
     try (ResolvingFileIO resolvingFileIO = new ResolvingFileIO()) {
-      resolvingFileIO.initialize(Map.of());
+      initializeClientFileIO(resolvingFileIO);
       resolvingFileIO.setConf(new Configuration());
       String fileLocation = externalCatalogBase + "/ns1/my_table/metadata/v1.metadata.json";
       TableMetadataParser.write(tableMetadata, resolvingFileIO.newOutputFile(fileLocation));
