@@ -66,6 +66,7 @@ import org.apache.polaris.core.persistence.PrincipalSecretsGenerator;
 import org.apache.polaris.core.persistence.RetryOnConcurrencyException;
 import org.apache.polaris.core.persistence.pagination.Page;
 import org.apache.polaris.core.persistence.pagination.PageToken;
+import org.apache.polaris.core.persistence.pagination.Token;
 import org.apache.polaris.core.policy.PolarisPolicyMappingRecord;
 import org.apache.polaris.core.storage.PolarisStorageConfigurationInfo;
 import org.apache.polaris.core.storage.PolarisStorageIntegration;
@@ -430,8 +431,6 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
       Function<PolarisBaseEntity, T> transformer,
       PageToken pageToken) {
 
-    ArrayList<T> currentPage = new ArrayList<>();
-
     Statement.Builder stmt = Entity.listEntities(pageToken)
         .bind("realmId")
         .to(callCtx.getRealmContext().getRealmIdentifier())
@@ -474,10 +473,9 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
 
       return Page.mapped(pageToken, resultStream,
           transformer, last -> {
-            return PageToken.build(Long.toString(last.getId()), requestedPageSize);
+            return () -> Long.toString(last.getId());
           });
     }
-    return Page.fromItems(Collections.emptyList());
   }
 
   @Override
@@ -712,7 +710,7 @@ public class GoogleSpannerBasePersistenceImpl implements BasePersistence, Integr
   PolarisStorageIntegration<T> loadPolarisStorageIntegration(
       PolarisCallContext callContext, PolarisBaseEntity entity) {
     PolarisStorageConfigurationInfo storageConfig =
-        BaseMetaStoreManager.extractStorageConfiguration(callContext, entity);
+        BaseMetaStoreManager.extractStorageConfiguration(callContext.getDiagServices(), entity);
     return storageIntegrationProvider.getStorageIntegrationForConfig(storageConfig);
   }
 

@@ -24,8 +24,10 @@ import io.smallrye.common.annotation.Identifier;
 import jakarta.annotation.Nullable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.apache.polaris.core.PolarisCallContext;
@@ -38,6 +40,7 @@ import org.apache.polaris.core.entity.PolarisEntity;
 import org.apache.polaris.core.entity.PolarisEntityConstants;
 import org.apache.polaris.core.entity.PolarisEntitySubType;
 import org.apache.polaris.core.entity.PolarisEntityType;
+import org.apache.polaris.core.entity.PrincipalEntity;
 import org.apache.polaris.core.persistence.AtomicOperationMetaStoreManager;
 import org.apache.polaris.core.persistence.BasePersistence;
 import org.apache.polaris.core.persistence.MetaStoreManagerFactory;
@@ -69,17 +72,26 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
   final Map<String, EntityCache> entityCacheMap = new HashMap<>();
   final Map<String, Supplier<BasePersistence>> sessionSupplierMap = new HashMap<>();
 
-  @Inject GoogleCloudSpannerConfiguration googleCloudSpannerConfiguration;
-  @Inject PolarisStorageIntegrationProvider polarisStorageIntegrationProvider;
+  @Inject
+  GoogleCloudSpannerConfiguration googleCloudSpannerConfiguration;
+  @Inject
+  PolarisStorageIntegrationProvider polarisStorageIntegrationProvider;
 
-  @Inject PolarisDiagnostics polarisDiagnostics;
+  @Inject
+  Clock clock;
+  @Inject
+  PolarisDiagnostics polarisDiagnostics;
 
-  @Inject PolarisConfigurationStore configurationStore;
+  @Inject
+  PolarisConfigurationStore configurationStore;
 
-  protected GoogleCloudSpannerMetaStoreManagerFactory() {}
+  protected GoogleCloudSpannerMetaStoreManagerFactory() {
+  }
 
-  @Inject protected Consumer<SchemaOptions> schemaInitializer;
-  @Inject protected Supplier<DatabaseClient> clientSupplier;
+  @Inject
+  protected Consumer<SchemaOptions> schemaInitializer;
+  @Inject
+  protected Supplier<DatabaseClient> clientSupplier;
 
   /*
   private RealmState getOrCreateRealmState(RealmContext realmContext, boolean isBootstrap) {
@@ -111,45 +123,40 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
 
   protected PrincipalSecretsGenerator secretsGenerator(String realmId,
       @Nullable RootCredentialsSet rootCredentialsSet) {
-    if(rootCredentialsSet != null) {
-      return PrincipalSecretsGenerator.bootstrap(realmId,rootCredentialsSet);
+    if (rootCredentialsSet != null) {
+      return PrincipalSecretsGenerator.bootstrap(realmId, rootCredentialsSet);
     } else {
       return PrincipalSecretsGenerator.RANDOM_SECRETS;
     }
   }
 
   @Override
-  public synchronized PolarisMetaStoreManager getOrCreateMetaStoreManager(RealmContext realmContext) {
-    return metaStoreManagerMap.computeIfAbsent(realmContext.getRealmIdentifier(),id -> {
-      return new AtomicOperationMetaStoreManager();
-    });
+  public synchronized PolarisMetaStoreManager getOrCreateMetaStoreManager(
+      RealmContext realmContext) {
+    if (!metaStoreManagerMap.containsKey(realmContext.getRealmIdentifier())) {
+      initializeRealmState(realmContext.getRealmIdentifier(), null);
+      checkBootstrapped(realmContext, metaStoreManagerMap.get(realmContext.getRealmIdentifier()));
+    }
+    return metaStoreManagerMap.get(realmContext.getRealmIdentifier());
   }
 
   @Override
-  public synchronized Supplier<? extends BasePersistence> getOrCreateSessionSupplier(RealmContext realmContext) {
-    return sessionSupplierMap.computeIfAbsent(realmContext.getRealmIdentifier(),id -> {
-      () -> {
-        return new GoogleSpannerBasePersistenceImpl(clientSupplier,)
-      }
-    })
-    return getOrCreateRealmState(realmContext).sessionSupplier();
+  public BasePersistence getOrCreateSession(RealmContext realmContext) {
+    if (!sessionSupplierMap.containsKey(realmContext.getRealmIdentifier())) {
+      initializeRealmState(realmContext.getRealmIdentifier(), null);
+    }
+    checkBootstrapped(realmContext, metaStoreManagerMap.get(realmContext.getRealmIdentifier()));
+    return sessionSupplierMap.get(realmContext.getRealmIdentifier()).get();
   }
 
   @Override
   public EntityCache getOrCreateEntityCache(RealmContext realmContext, RealmConfig realmConfig) {
-    return null;
-  }
-
-
-  public StorageCredentialCache getOrCreateStorageCredentialCache(RealmContext realmContext) {
-    return storageCredentialCacheMap.computeIfAbsent(
-        realmContext.getRealmIdentifier(),
-        (realmId) -> new StorageCredentialCache(realmContext, configurationStore));
-  }
-
-  @Override
-  public EntityCache getOrCreateEntityCache(RealmContext realmContext) {
-    return getOrCreateRealmState(realmContext).entityCache();
+    if (!entityCacheMap.containsKey(realmContext.getRealmIdentifier())) {
+      PolarisMetaStoreManager manager = getOrCreateMetaStoreManager(realmContext);
+      entityCacheMap.put(realmContext.getRealmIdentifier(),
+          new InMemoryEntityCache(realmConfig, manager));
+    }
+    return entityCacheMap.get(realmContext.getRealmIdentifier());
   }
 
   @Override
@@ -161,12 +168,12 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
         .rootCredentialsSet(rootCredentialsSet)
         .schemaOptions(schemaOptions)
         .build();
+    return bootstrapRealms(bootstrapOptions);
   }
-
 
   @Override
   public Map<String, PrincipalSecretsResult> bootstrapRealms(BootstrapOptions bootstrapOptions) {
-    HashMap<String,PrincipalSecretsResult> results = new HashMap<>();
+    HashMap<String, PrincipalSecretsResult> results = new HashMap<>();
 
     boolean schemaInitialized = false;
 
@@ -183,24 +190,26 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
       // The JDBC version does this for every realm, but that doesn't seem right as you only
       // need to do it once per set of realms as it is constant across all realms. We do this
       // once on the first time we encounter a non-bootstrapped realm.
-      if(!schemaInitialized) {
+      if (!schemaInitialized) {
         schemaInitializer.accept(bootstrapOptions.schemaOptions());
         schemaInitialized = true;
       }
-
-      final RealmContext realmContext = () -> realmId;
-
-      sessionSupplierMap.put(realmId,() -> {
-        return new GoogleSpannerBasePersistenceImpl(
-            clientSupplier,
-            secretsGenerator(realmId,rootCredentialsSet),
-            polarisStorageIntegrationProvider);
-      });
-      metaStoreManagerMap.put(realmId,new AtomicOperationMetaStoreManager());
-      results.put(realmId,bootstrapServiceAndCreatePolarisPrincipalForRealm(realmContext));
+      initializeRealmState(realmId, rootCredentialsSet);
+      results.put(realmId, bootstrapServiceAndCreatePolarisPrincipalForRealm(() -> realmId));
 
     }
     return results;
+  }
+
+  protected void initializeRealmState(final String realmId, RootCredentialsSet rootCredentialsSet) {
+    final RealmContext realmContext = () -> realmId;
+    sessionSupplierMap.put(realmId, () -> {
+      return new GoogleSpannerBasePersistenceImpl(
+          clientSupplier,
+          secretsGenerator(realmId, rootCredentialsSet),
+          polarisStorageIntegrationProvider);
+    });
+    metaStoreManagerMap.put(realmId, new AtomicOperationMetaStoreManager(clock));
   }
 
   @Override
@@ -208,98 +217,48 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
     Map<String, BaseResult> results = new HashMap<>();
     for (String realmId : realms) {
       RealmContext realmContext = () -> realmId;
-      RealmState state = getOrCreateRealmState(realmContext);
+      PolarisMetaStoreManager manager = getOrCreateMetaStoreManager(realmContext);
+      BasePersistence session = getOrCreateSession(realmContext);
 
       PolarisCallContext callCtx =
-          new PolarisCallContext(realmContext, state.sessionSupplier().get(), polarisDiagnostics);
-      CallContext restore = CallContext.getCurrentContext();
-      CallContext.setCurrentContext(callCtx);
-      results.put(realmId, getOrCreateMetaStoreManager(realmContext).purge(callCtx));
-      CallContext.setCurrentContext(restore);
+          new PolarisCallContext(realmContext, session, polarisDiagnostics);
+      BaseResult result = manager.purge(callCtx);
+      results.put(realmId, result);
+      sessionSupplierMap.remove(realmId);
+      metaStoreManagerMap.remove(realmId);
     }
     return Map.copyOf(results);
   }
 
   protected PrincipalSecretsResult
   bootstrapServiceAndCreatePolarisPrincipalForRealm(RealmContext realmContext) {
+    //We can assume the metastore manager has been created at this point
+    PolarisMetaStoreManager manager = metaStoreManagerMap.get(realmContext.getRealmIdentifier());
+    BasePersistence session = sessionSupplierMap.get(realmContext.getRealmIdentifier()).get();
+    PolarisCallContext callCtx =
+        new PolarisCallContext(realmContext, session, polarisDiagnostics);
 
+    if (manager.findRootPrincipal(callCtx).isPresent()) {
+      // Match JDBC in case integration tests rely on this exact format.
+      String msg = "\n\n It appears this metastore manager has already been bootstrapped. "
+          + "To continue bootstrapping, please first purge the metastore with the `purge` command. \n\n";
+      LOGGER.error(msg);
+      throw new IllegalArgumentException(msg);
+    }
 
-    /*
-
-
-      BasePersistence session = state.sessionSupplier().get();
-      // Make sure we have a realm entry before continuing with the realm creation process
-      if (session instanceof GoogleSpannerBasePersistenceImpl) {
-        ((GoogleSpannerBasePersistenceImpl) session).bootstrapRealm(realmId);
-      }
-
-      PolarisCallContext callCtx =
-          new PolarisCallContext(realmContext, session, polarisDiagnostics);
-      CallContext restore = CallContext.getCurrentContext();
-      CallContext.setCurrentContext(callCtx);
-
-      // Check for the root principal
-      EntityResult preliminaryCheck =
-          state
-              .metaStoreManager()
-              .readEntityByName(
-                  callCtx,
-                  null,
-                  PolarisEntityType.PRINCIPAL,
-                  PolarisEntitySubType.NULL_SUBTYPE,
-                  PolarisEntityConstants.getRootPrincipalName());
-      if (preliminaryCheck.isSuccess()) {
-        String overrideMessage =
-            "It appears this metastore manager has already been bootstrapped. "
-                + "To continue bootstrapping, please first purge the metastore with the `purge` command.";
-        LOGGER.error("\n\n {} \n\n", overrideMessage);
-        throw new IllegalArgumentException(overrideMessage);
-      }
-
-      BaseResult result = state.metaStoreManager().bootstrapPolarisService(callCtx);
-      if (result.isSuccess()) {
-        EntityResult rootPrincipal =
-            state
-                .metaStoreManager()
-                .readEntityByName(
-                    callCtx,
-                    null,
-                    PolarisEntityType.PRINCIPAL,
-                    PolarisEntitySubType.NULL_SUBTYPE,
-                    PolarisEntityConstants.getRootPrincipalName());
-        PrincipalSecretsResult secrets =
-            state
-                .metaStoreManager()
-                .loadPrincipalSecrets(
-                    callCtx,
-                    PolarisEntity.of(rootPrincipal.getEntity())
-                        .getInternalPropertiesAsMap()
-                        .get(PolarisEntityConstants.getClientIdPropertyName()));
-        results.put(realmId, secrets);
-        LOGGER.info("Successfully bootstrapped realm {}", realmId);
-      } else {
-        LOGGER.info("Failed to bootstrap realm {}", realmId);
-      }
-      CallContext.setCurrentContext(restore);
-     */
-    return null;
+    manager.bootstrapPolarisService(callCtx);
+    PrincipalEntity rootPrincipal = manager.findRootPrincipal(callCtx).orElseThrow();
+    return manager.loadPrincipalSecrets(callCtx, rootPrincipal.getInternalPropertiesAsMap()
+        .get(PolarisEntityConstants.getClientIdPropertyName()));
   }
 
-  protected void checkBootstrapped(RealmContext realmContext, RealmState state) {
-    PolarisCallContext polarisContext =
-        new PolarisCallContext(realmContext, state.sessionSupplier().get(), polarisDiagnostics);
-    CallContext restore = CallContext.getCurrentContext();
-    CallContext.setCurrentContext(polarisContext);
-    EntityResult rootPrincipalLookup =
-        state
-            .metaStoreManager()
-            .readEntityByName(
-                polarisContext,
-                null,
-                PolarisEntityType.PRINCIPAL,
-                PolarisEntitySubType.NULL_SUBTYPE,
-                PolarisEntityConstants.getRootPrincipalName());
-    if (!rootPrincipalLookup.isSuccess()) {
+  protected void checkBootstrapped(RealmContext realmContext, PolarisMetaStoreManager state) {
+    PolarisMetaStoreManager manager = metaStoreManagerMap.get(realmContext.getRealmIdentifier());
+    BasePersistence session = sessionSupplierMap.get(realmContext.getRealmIdentifier()).get();
+    PolarisCallContext callCtx =
+        new PolarisCallContext(realmContext, session, polarisDiagnostics);
+
+    if (manager.findRootPrincipal(callCtx).isEmpty()) {
       // This exact format is needed to pass the purge tests.
       LOGGER.error(
           "\n\n Realm {} is not bootstrapped, could not load root principal. Please run Bootstrap command. \n\n",
@@ -307,7 +266,6 @@ public class GoogleCloudSpannerMetaStoreManagerFactory implements MetaStoreManag
       throw new IllegalStateException(
           "Realm is not bootstrapped, please run server in bootstrap mode.");
     }
-    CallContext.setCurrentContext(restore);
   }
 
 }
